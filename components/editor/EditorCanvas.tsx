@@ -21,12 +21,17 @@ interface EditorCanvasProps {
     onNoteClick: (id: string, multi: boolean) => void;
     onNoteRightClick: (id: string) => void;
     getSnapTime: (time: number) => number; // Helper from hook
+    
+    // Live Recording
+    activeRecordingLanes?: { [key: number]: number };
+    recordSnap?: boolean;
 }
 
 export const EditorCanvas: React.FC<EditorCanvasProps> = ({
     notes, currentTime, duration, laneCount, theme, bpm, snapDivisor, zoomLevel,
     activeTool, selectedNoteIds,
-    onSeek, onAddNote, onNoteClick, onNoteRightClick, getSnapTime
+    onSeek, onAddNote, onNoteClick, onNoteRightClick, getSnapTime,
+    activeRecordingLanes, recordSnap
 }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -220,8 +225,16 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
 
         // 3. Notes
         const renderNoteObj = (note: Note, isSelected: boolean, isGhost: boolean = false) => {
-            const y = timeToY(note.time);
-            if (!isGhost && (y > height + 50 || y < -500)) return;
+            const headY = timeToY(note.time);
+            
+            let tailY = headY;
+            if (note.duration > 0) {
+                tailY = timeToY(note.time + note.duration);
+            }
+
+            // Visibility Check
+            // Note extends from tailY (top) to headY (bottom)
+            if (!isGhost && (tailY > height + 50 || headY < -500)) return;
 
             const x = startX + note.lane * LANE_WIDTH + 2;
             const w = LANE_WIDTH - 4;
@@ -232,8 +245,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
             
             // Hold Body
             if (note.duration > 0) {
-                const tailY = timeToY(note.time + note.duration);
-                const bodyH = y - tailY;
+                const bodyH = headY - tailY;
                 
                 ctx.fillStyle = isSelected ? '#fff' : (isGhost ? color : theme.secondaryColor) + '88';
                 ctx.fillRect(x + 4, tailY, w - 8, bodyH);
@@ -242,6 +254,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
             }
 
             // Note Head
+            const y = headY;
             ctx.fillStyle = isSelected ? '#ffffff' : color;
             if (isGhost) ctx.globalAlpha = 0.6;
             
@@ -288,13 +301,37 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
             renderNoteObj(ghostNote, false, true);
         }
 
-        // 5. Hit Line
+        // 5. Recording Preview
+        if (activeRecordingLanes) {
+            Object.entries(activeRecordingLanes).forEach(([laneStr, rawStartTime]) => {
+                const lane = parseInt(laneStr);
+                // Apply snap to start time if recordSnap is on, to show true start position
+                const startTime = recordSnap ? getSnapTime(rawStartTime) : rawStartTime;
+                
+                // Calculate duration relative to current time
+                const duration = Math.max(0, currentTime - startTime);
+                
+                const previewNote: Note = {
+                    id: `rec-${lane}`,
+                    time: startTime,
+                    lane: lane as NoteLane,
+                    type: 'NORMAL',
+                    duration: duration,
+                    hit: false, visible: true, isHolding: false
+                };
+                
+                // Render as normal note (not ghost, not selected)
+                renderNoteObj(previewNote, false, false);
+            });
+        }
+
+        // 6. Hit Line
         ctx.strokeStyle = '#ff0044'; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.moveTo(startX - 20, HIT_LINE_Y); ctx.lineTo(startX + TRACK_WIDTH + 20, HIT_LINE_Y); ctx.stroke();
         ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = '#ff0044'; ctx.textAlign = 'right';
         ctx.fillText("判定线", startX - 25, HIT_LINE_Y + 4);
 
-    }, [notes, currentTime, canvasHeight, canvasWidth, laneCount, theme, bpm, snapDivisor, zoomLevel, selectedNoteIds, dragState]);
+    }, [notes, currentTime, canvasHeight, canvasWidth, laneCount, theme, bpm, snapDivisor, zoomLevel, selectedNoteIds, dragState, activeRecordingLanes]);
 
     return (
         <div ref={containerRef} className="w-full h-full bg-[#050505] relative overflow-hidden cursor-crosshair">

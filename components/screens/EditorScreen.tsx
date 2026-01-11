@@ -106,10 +106,10 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
                      // If recordSnap is true, passing 'true' to addNote will snap Start and End.
                      // The requirement is "Long press will generate Hold, will not generate Catch".
                      
-                     // If rawDuration is very short (tap), addNote logic might make it 0 duration if snapped start == snapped end.
-                     // We trust addNote to handle the math.
+                     // CHANGE: Reduce Hold sensitivity. Treat durations < 0.5s as Tap.
+                     const effectiveDuration = rawDuration < 0.5 ? 0 : rawDuration;
                      
-                     editor.addNote(startTime, laneIndex, rawDuration, 'NORMAL', recordSnap);
+                     editor.addNote(startTime, laneIndex, effectiveDuration, 'NORMAL', recordSnap);
                      
                      delete activeRecordingLanes.current[laneIndex];
                  }
@@ -442,6 +442,8 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
                         onNoteClick={editor.toggleSelection}
                         onNoteRightClick={editor.deleteNote}
                         getSnapTime={editor.getSnapTime}
+                        activeRecordingLanes={activeRecordingLanes.current}
+                        recordSnap={recordSnap}
                      />
                      {isRecording && (
                          <div className="absolute top-4 right-4 bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full animate-pulse shadow-lg pointer-events-none">

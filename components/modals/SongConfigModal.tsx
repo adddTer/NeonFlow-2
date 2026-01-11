@@ -112,61 +112,81 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                      <div className="space-y-6">
 
                          <div className="space-y-4">
-                            <div>
-                                <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-2">按键模式</h3>
-                                <div className="grid grid-cols-2 gap-2">
-                                    <button 
-                                        onClick={() => setLaneCount(4)} 
-                                        disabled={difficulty === BeatmapDifficulty.Titan && mode === 'AUTO'}
-                                        className={`p-3 rounded-xl text-left font-bold transition-all border 
-                                            ${laneCount === 4 
-                                                ? 'bg-neon-blue border-neon-blue text-black' 
-                                                : (difficulty === BeatmapDifficulty.Titan && mode === 'AUTO')
-                                                    ? 'bg-transparent border-white/5 text-gray-600 cursor-not-allowed opacity-50'
-                                                    : 'bg-transparent border-white/10 text-gray-400 hover:bg-white/5'}`}
-                                    >
-                                        4道
-                                    </button>
-                                    <button onClick={() => setLaneCount(6)} className={`p-3 rounded-xl text-left font-bold transition-all border ${laneCount === 6 ? 'bg-neon-blue border-neon-blue text-black' : 'bg-transparent border-white/10 text-gray-400 hover:bg-white/5'}`}>
-                                        6道
-                                    </button>
-                                </div>
-                            </div>
                             
                             {mode === 'AUTO' && (
-                                <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-3">
-                                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">生成元素</h3>
-                                    <div className="space-y-2">
-                                        <label className="flex items-center gap-3 cursor-pointer group hover:bg-white/5 p-2 rounded-lg transition-colors -ml-2">
-                                            <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${features.normal ? 'bg-neon-blue border-neon-blue' : 'border-gray-500'}`}>
-                                                {features.normal && <Check className="w-3.5 h-3.5 text-black" />}
-                                            </div>
-                                            <input type="checkbox" className="hidden" checked={features.normal} onChange={e => setFeatures({...features, normal: e.target.checked})} />
-                                            <span className="text-gray-200 font-bold text-sm">单点音符</span>
-                                        </label>
-                                        <label className="flex items-center gap-3 cursor-pointer group hover:bg-white/5 p-2 rounded-lg transition-colors -ml-2">
-                                            <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${features.holds ? 'bg-neon-blue border-neon-blue' : 'border-gray-500'}`}>
-                                                {features.holds && <Check className="w-3.5 h-3.5 text-black" />}
-                                            </div>
-                                            <input type="checkbox" className="hidden" checked={features.holds} onChange={e => setFeatures({...features, holds: e.target.checked})} />
-                                            <span className="text-gray-200 font-bold text-sm">长条音符</span>
-                                        </label>
-                                        <label className="flex items-center gap-3 cursor-pointer group hover:bg-white/5 p-2 rounded-lg transition-colors -ml-2">
-                                            <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${features.catch ? 'bg-neon-blue border-neon-blue' : 'border-gray-500'}`}>
-                                                {features.catch && <Check className="w-3.5 h-3.5 text-black" />}
-                                            </div>
-                                            <input type="checkbox" className="hidden" checked={features.catch} onChange={e => setFeatures({...features, catch: e.target.checked})} />
-                                            <span className="text-gray-200 font-bold text-sm">滑键音符</span>
-                                        </label>
+                                <>
+                                    <div>
+                                        <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-2">按键模式</h3>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <button 
+                                                onClick={() => setLaneCount(4)} 
+                                                disabled={difficulty === BeatmapDifficulty.Titan}
+                                                className={`p-3 rounded-xl text-left font-bold transition-all border 
+                                                    ${laneCount === 4 
+                                                        ? 'bg-neon-blue border-neon-blue text-black' 
+                                                        : (difficulty === BeatmapDifficulty.Titan)
+                                                            ? 'bg-transparent border-white/5 text-gray-600 cursor-not-allowed opacity-50'
+                                                            : 'bg-transparent border-white/10 text-gray-400 hover:bg-white/5'}`}
+                                            >
+                                                4道
+                                            </button>
+                                            <button onClick={() => setLaneCount(6)} className={`p-3 rounded-xl text-left font-bold transition-all border ${laneCount === 6 ? 'bg-neon-blue border-neon-blue text-black' : 'bg-transparent border-white/10 text-gray-400 hover:bg-white/5'}`}>
+                                                6道
+                                            </button>
+                                        </div>
                                     </div>
-                                </div>
+                                    
+                                    <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-3">
+                                        <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">生成元素</h3>
+                                        <div className="space-y-2">
+                                            <label className="flex items-center gap-3 cursor-pointer group hover:bg-white/5 p-2 rounded-lg transition-colors -ml-2">
+                                                <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${features.normal ? 'bg-neon-blue border-neon-blue' : 'border-gray-500'}`}>
+                                                    {features.normal && <Check className="w-3.5 h-3.5 text-black" />}
+                                                </div>
+                                                <input type="checkbox" className="hidden" checked={features.normal} onChange={e => setFeatures({...features, normal: e.target.checked})} />
+                                                <span className="text-gray-200 font-bold text-sm">单点音符</span>
+                                            </label>
+                                            <label className="flex items-center gap-3 cursor-pointer group hover:bg-white/5 p-2 rounded-lg transition-colors -ml-2">
+                                                <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${features.holds ? 'bg-neon-blue border-neon-blue' : 'border-gray-500'}`}>
+                                                    {features.holds && <Check className="w-3.5 h-3.5 text-black" />}
+                                                </div>
+                                                <input type="checkbox" className="hidden" checked={features.holds} onChange={e => setFeatures({...features, holds: e.target.checked})} />
+                                                <span className="text-gray-200 font-bold text-sm">长条音符</span>
+                                            </label>
+                                            <label className="flex items-center gap-3 cursor-pointer group hover:bg-white/5 p-2 rounded-lg transition-colors -ml-2">
+                                                <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${features.catch ? 'bg-neon-blue border-neon-blue' : 'border-gray-500'}`}>
+                                                    {features.catch && <Check className="w-3.5 h-3.5 text-black" />}
+                                                </div>
+                                                <input type="checkbox" className="hidden" checked={features.catch} onChange={e => setFeatures({...features, catch: e.target.checked})} />
+                                                <span className="text-gray-200 font-bold text-sm">滑键音符</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </>
                             )}
                             
                             {mode === 'MANUAL' && (
-                                <div className="p-4 rounded-xl bg-neon-purple/5 border border-neon-purple/20 space-y-3">
-                                    <h3 className="text-sm font-bold text-neon-purple uppercase tracking-widest flex items-center gap-2">
-                                        <BrainCircuit className="w-3 h-3"/> 辅助功能
-                                    </h3>
+                                <div className="p-4 rounded-xl bg-neon-purple/5 border border-neon-purple/20 space-y-4">
+                                    <div className="flex items-center justify-between">
+                                        <h3 className="text-sm font-bold text-neon-purple uppercase tracking-widest flex items-center gap-2">
+                                            <BrainCircuit className="w-3 h-3"/> 基础配置
+                                        </h3>
+                                        <div className="flex bg-black/40 rounded-lg p-0.5 border border-neon-purple/20">
+                                            <button 
+                                                onClick={() => setLaneCount(4)}
+                                                className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${laneCount === 4 ? 'bg-neon-purple text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+                                            >
+                                                4K
+                                            </button>
+                                            <button 
+                                                onClick={() => setLaneCount(6)}
+                                                className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${laneCount === 6 ? 'bg-neon-purple text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
+                                            >
+                                                6K
+                                            </button>
+                                        </div>
+                                    </div>
+
                                     {/* Enforce AI Analysis */}
                                     <div className="flex items-center gap-3 p-2 rounded-lg border border-white/5 bg-white/5 cursor-not-allowed opacity-75">
                                         <div className="w-5 h-5 rounded border flex items-center justify-center bg-neon-purple border-neon-purple">
