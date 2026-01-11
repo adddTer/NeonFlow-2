@@ -337,7 +337,7 @@ function App() {
             <div className="flex items-center gap-3 group" onClick={backToLibrary}>
               <div className="relative cursor-pointer">
                   <div className="absolute inset-0 bg-neon-blue blur-lg opacity-20 group-hover:opacity-40 transition-opacity"></div>
-                  <Music className="w-7 h-7 md:w-8 md:h-8 relative z-10 transition-colors" style={{ color: status === GameStatus.Library ? '#00f3ff' : theme.primaryColor }}>
+                  <Music className="w-7 h-7 md:w-8 md:h-8 relative z-10 transition-colors" style={{ color: status === GameStatus.Library ? '#00f3ff' : theme.primaryColor }} />
               </div>
               <div onClick={handleTitleClick} className="cursor-default">
                   <h1 className="text-xl md:text-2xl font-black tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400 group-hover:to-white transition-all select-none">NEON<span style={{ color: status === GameStatus.Library ? '#00f3ff' : theme.primaryColor }}>FLOW 2</span></h1>

@@ -47,21 +47,8 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
             onConfirm(); // Normal AI Gen flow
         } else {
             // Manual flow: 
-            // if manualAnalyzeAI is TRUE, then skipAI should be FALSE (we WANT analysis)
-            // if manualAnalyzeAI is FALSE, then skipAI should be TRUE
-            // But 'skipAI' prop is global state passed down. We should probably just manage logic in parent?
-            // Actually, the parent hook uses 'skipAI' state. So we should set that state before confirming.
-            setSkipAI(!manualAnalyzeAI);
-            // Delay slightly to ensure state update? Or pass config in onConfirm.
-            // Better to update state:
-            // However, React state updates are async. 
-            // Let's pass the intent via onConfirm arg if supported, or rely on parent respecting the setSkipAI we just did?
-            // Actually, parent 'handleCreateBeatmap' reads current state 'skipAI'. 
-            // If we call setSkipAI now, it won't be updated in the closure of handleCreateBeatmap immediately.
-            // It is safer to rely on 'skipAI' being set correctly by the UI interaction *before* confirm.
-            
-            // Wait, let's fix this in useSongGenerator. 
-            // We can just rely on the 'skipAI' prop if we bind it to the checkbox.
+            // We want to ensure skipAI is false (Analysis Enabled)
+            setSkipAI(false);
             onConfirm({ empty: true });
         }
     };
@@ -187,16 +174,16 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                                     <h3 className="text-sm font-bold text-neon-purple uppercase tracking-widest flex items-center gap-2">
                                         <BrainCircuit className="w-3 h-3"/> 辅助功能
                                     </h3>
-                                    <label className="flex items-center gap-3 cursor-pointer group">
-                                        <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${!skipAI ? 'bg-neon-purple border-neon-purple' : 'border-gray-500'}`}>
-                                            {!skipAI && <Check className="w-3.5 h-3.5 text-black" />}
+                                    {/* Enforce AI Analysis - User request: "Temporarily only allow AI intervention" */}
+                                    <div className="flex items-center gap-3 p-2 rounded-lg border border-white/5 bg-white/5 cursor-not-allowed opacity-75">
+                                        <div className="w-5 h-5 rounded border flex items-center justify-center bg-neon-purple border-neon-purple">
+                                            <Check className="w-3.5 h-3.5 text-black" />
                                         </div>
-                                        <input type="checkbox" className="hidden" checked={!skipAI} onChange={e => setSkipAI(!e.target.checked)} />
                                         <div className="flex flex-col">
                                             <span className="text-gray-200 font-bold text-sm">启用 AI 辅助分析</span>
-                                            <span className="text-[10px] text-gray-500">自动检测 BPM、曲名及生成视觉主题</span>
+                                            <span className="text-[10px] text-gray-500">自动检测 BPM、曲名及生成视觉主题 (当前已强制开启)</span>
                                         </div>
-                                    </label>
+                                    </div>
                                 </div>
                             )}
 
