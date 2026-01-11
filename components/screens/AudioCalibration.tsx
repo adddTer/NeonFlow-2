@@ -1,7 +1,8 @@
+
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Minus, Plus, Settings, Eye, EyeOff, ChevronUp, ChevronDown } from 'lucide-react';
 import GameCanvas from '../GameCanvas';
-import { GameStatus, Note, AITheme, LaneCount, NoteLane } from '../../types';
+import { GameStatus, Note, AITheme } from '../../types';
 
 interface AudioCalibrationProps {
   initialOffset: number;
@@ -11,12 +12,12 @@ interface AudioCalibrationProps {
 export const AudioCalibration: React.FC<AudioCalibrationProps> = ({ initialOffset, onClose }) => {
   const [offset, setOffset] = useState(initialOffset);
   const [loopKey, setLoopKey] = useState(0);
-  const [hideNotes, setHideNotes] = useState(false); // New: Hide falling notes
-  const [isPanelExpanded, setIsPanelExpanded] = useState(true); // Collapsible panel
+  const [hideNotes, setHideNotes] = useState(false); 
+  const [isPanelExpanded, setIsPanelExpanded] = useState(true);
 
   // Generate Synthetic Song & Map
   const { buffer, notes, theme } = useMemo(() => {
-      const duration = 4.0; // Short loop (4 seconds = 2 bars at 120bpm)
+      const duration = 4.0; // Short loop
       const bpm = 120;
       const beatInterval = 60 / bpm; // 0.5s
       
@@ -83,7 +84,6 @@ export const AudioCalibration: React.FC<AudioCalibrationProps> = ({ initialOffse
   }, []);
 
   const handleGameEnd = () => {
-      // Immediate restart loop
       setLoopKey(prev => prev + 1);
   };
 
@@ -102,7 +102,7 @@ export const AudioCalibration: React.FC<AudioCalibrationProps> = ({ initialOffse
                 scrollSpeed={5.0}
                 keyBindings={['d', 'f', 'j', 'k']}
                 modifiers={[]}
-                onScoreUpdate={() => {}} // Ignore score updates
+                onScoreUpdate={() => {}} 
                 onGameEnd={handleGameEnd}
             />
         </div>
@@ -205,5 +205,6 @@ export const AudioCalibration: React.FC<AudioCalibrationProps> = ({ initialOffse
                 </div>
             )}
         </div>
-    );
+    </div>
+  );
 };

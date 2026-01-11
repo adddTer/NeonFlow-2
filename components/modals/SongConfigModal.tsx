@@ -30,7 +30,6 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
 }) => {
     
     const [mode, setMode] = useState<'AUTO' | 'MANUAL'>('AUTO');
-    const [manualAnalyzeAI, setManualAnalyzeAI] = useState(true);
 
     const handleDifficultySelect = (diff: BeatmapDifficulty) => {
         setDifficulty(diff);
@@ -46,22 +45,16 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
         if (mode === 'AUTO') {
             onConfirm(); // Normal AI Gen flow
         } else {
-            // Manual flow: 
-            // We want to ensure skipAI is false (Analysis Enabled)
+            // Manual flow: Enforce AI analysis (skipAI = false)
             setSkipAI(false);
             onConfirm({ empty: true });
         }
     };
 
-    // When switching to manual, we might want to default skipAI to false (enable analysis)
+    // When switching to manual, we default skipAI to false (enable analysis)
     const toggleMode = (m: 'AUTO' | 'MANUAL') => {
         setMode(m);
-        if (m === 'AUTO') {
-            setSkipAI(false); // Default AI ON for Auto mode
-        } else {
-            // For manual, we use a local state 'manualAnalyzeAI' to control the 'skipAI' prop visually
-            setSkipAI(false); // Default to analyzing
-        }
+        setSkipAI(false); 
     };
 
     return (
@@ -142,28 +135,28 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                             
                             {mode === 'AUTO' && (
                                 <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-3">
-                                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">谱面元素 (AI)</h3>
+                                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">生成元素</h3>
                                     <div className="space-y-2">
                                         <label className="flex items-center gap-3 cursor-pointer group hover:bg-white/5 p-2 rounded-lg transition-colors -ml-2">
                                             <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${features.normal ? 'bg-neon-blue border-neon-blue' : 'border-gray-500'}`}>
                                                 {features.normal && <Check className="w-3.5 h-3.5 text-black" />}
                                             </div>
                                             <input type="checkbox" className="hidden" checked={features.normal} onChange={e => setFeatures({...features, normal: e.target.checked})} />
-                                            <span className="text-gray-200 font-bold text-sm">普通音符</span>
+                                            <span className="text-gray-200 font-bold text-sm">单点音符</span>
                                         </label>
                                         <label className="flex items-center gap-3 cursor-pointer group hover:bg-white/5 p-2 rounded-lg transition-colors -ml-2">
                                             <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${features.holds ? 'bg-neon-blue border-neon-blue' : 'border-gray-500'}`}>
                                                 {features.holds && <Check className="w-3.5 h-3.5 text-black" />}
                                             </div>
                                             <input type="checkbox" className="hidden" checked={features.holds} onChange={e => setFeatures({...features, holds: e.target.checked})} />
-                                            <span className="text-gray-200 font-bold text-sm">长条 (Hold)</span>
+                                            <span className="text-gray-200 font-bold text-sm">长条音符</span>
                                         </label>
                                         <label className="flex items-center gap-3 cursor-pointer group hover:bg-white/5 p-2 rounded-lg transition-colors -ml-2">
                                             <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${features.catch ? 'bg-neon-blue border-neon-blue' : 'border-gray-500'}`}>
                                                 {features.catch && <Check className="w-3.5 h-3.5 text-black" />}
                                             </div>
                                             <input type="checkbox" className="hidden" checked={features.catch} onChange={e => setFeatures({...features, catch: e.target.checked})} />
-                                            <span className="text-gray-200 font-bold text-sm">滑键 (Catch)</span>
+                                            <span className="text-gray-200 font-bold text-sm">滑键音符</span>
                                         </label>
                                     </div>
                                 </div>
@@ -174,14 +167,14 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                                     <h3 className="text-sm font-bold text-neon-purple uppercase tracking-widest flex items-center gap-2">
                                         <BrainCircuit className="w-3 h-3"/> 辅助功能
                                     </h3>
-                                    {/* Enforce AI Analysis - User request: "Temporarily only allow AI intervention" */}
+                                    {/* Enforce AI Analysis */}
                                     <div className="flex items-center gap-3 p-2 rounded-lg border border-white/5 bg-white/5 cursor-not-allowed opacity-75">
                                         <div className="w-5 h-5 rounded border flex items-center justify-center bg-neon-purple border-neon-purple">
                                             <Check className="w-3.5 h-3.5 text-black" />
                                         </div>
                                         <div className="flex flex-col">
                                             <span className="text-gray-200 font-bold text-sm">启用 AI 辅助分析</span>
-                                            <span className="text-[10px] text-gray-500">自动检测 BPM、曲名及生成视觉主题 (当前已强制开启)</span>
+                                            <span className="text-[10px] text-gray-500">自动检测 BPM、曲名及生成视觉主题 (强制)</span>
                                         </div>
                                     </div>
                                 </div>
@@ -194,7 +187,7 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                      <div className="flex flex-col gap-3">
                          {mode === 'AUTO' ? (
                              <>
-                                 <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">选择难度 (AI生成)</h3>
+                                 <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">选择难度</h3>
                                  {[
                                     { id: BeatmapDifficulty.Easy, label: 'Easy', desc: '轻松休闲', color: 'bg-green-500' },
                                     { id: BeatmapDifficulty.Normal, label: 'Normal', desc: '标准难度', color: 'bg-blue-500' },
