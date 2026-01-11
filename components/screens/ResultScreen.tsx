@@ -15,13 +15,13 @@ interface ResultScreenProps {
 
 const ModIcon = ({ mod }: { mod: GameModifier }) => {
     switch (mod) {
-        case GameModifier.DoubleTime: return <FastForward className="w-4 h-4 text-red-400" title="Double Time" />;
-        case GameModifier.HalfTime: return <Rewind className="w-4 h-4 text-blue-400" title="Half Time" />;
-        case GameModifier.HardRock: return <Crosshair className="w-4 h-4 text-orange-400" title="Hard Rock" />;
-        case GameModifier.SuddenDeath: return <Skull className="w-4 h-4 text-gray-200" title="Sudden Death" />;
-        case GameModifier.Hidden: return <Eye className="w-4 h-4 text-purple-400" title="Hidden" />;
-        case GameModifier.Flashlight: return <Flashlight className="w-4 h-4 text-yellow-400" title="Flashlight" />;
-        case GameModifier.Auto: return <Bot className="w-4 h-4 text-green-400" title="Auto" />;
+        case GameModifier.DoubleTime: return <div title="Double Time" className="flex"><FastForward className="w-4 h-4 text-red-400" /></div>;
+        case GameModifier.HalfTime: return <div title="Half Time" className="flex"><Rewind className="w-4 h-4 text-blue-400" /></div>;
+        case GameModifier.HardRock: return <div title="Hard Rock" className="flex"><Crosshair className="w-4 h-4 text-orange-400" /></div>;
+        case GameModifier.SuddenDeath: return <div title="Sudden Death" className="flex"><Skull className="w-4 h-4 text-gray-200" /></div>;
+        case GameModifier.Hidden: return <div title="Hidden" className="flex"><Eye className="w-4 h-4 text-purple-400" /></div>;
+        case GameModifier.Flashlight: return <div title="Flashlight" className="flex"><Flashlight className="w-4 h-4 text-yellow-400" /></div>;
+        case GameModifier.Auto: return <div title="Auto" className="flex"><Bot className="w-4 h-4 text-green-400" /></div>;
         default: return null;
     }
 };

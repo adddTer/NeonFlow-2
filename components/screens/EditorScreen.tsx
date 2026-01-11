@@ -1,21 +1,27 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { EditorCanvas } from '../editor/EditorCanvas';
 import { useChartEditor, EditorTool, SnapDivisor } from '../../hooks/useChartEditor';
-import { SavedSong, AITheme, NoteType } from '../../types';
-import { Play, Pause, Save, LogOut, Plus, Trash2, MousePointer, Magnet, Clock, ChevronDown, Layers, Music, Settings2, AlertTriangle, X } from 'lucide-react';
+import { SavedSong, AITheme, NoteType, KeyConfig } from '../../types';
+import { Play, Pause, Save, LogOut, Plus, Trash2, MousePointer, Magnet, Clock, ChevronDown, Layers, Music, Settings2, AlertTriangle, X, Circle, Mic } from 'lucide-react';
 import { saveSong, getSongById } from '../../services/storageService';
 
 interface EditorScreenProps {
     song: SavedSong;
     onExit: () => void;
     onSaveSuccess: () => void;
+    keyConfig: KeyConfig;
 }
 
-export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSaveSuccess }) => {
+export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSaveSuccess, keyConfig }) => {
     
     const [audioBuffer, setAudioBuffer] = React.useState<AudioBuffer | null>(null);
     const [showExitConfirm, setShowExitConfirm] = useState(false);
+    
+    // Recording State
+    const [isRecording, setIsRecording] = useState(false);
+    const [recordSnap, setRecordSnap] = useState(true);
+    const activeRecordingLanes = useRef<{[key: number]: number}>({});
 
     // Load Audio
     useEffect(() => {
@@ -40,7 +46,6 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
 
     const handleSave = async (newNotes: any[]) => {
         // Critical Fix: Fetch full song to ensure we have audioData. 
-        // The 'song' prop is likely a lightweight version with empty audioData.
         const fullSong = await getSongById(song.id);
         
         if (!fullSong) {
@@ -51,7 +56,6 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
         const updatedSong = { 
             ...fullSong, 
             notes: newNotes,
-            // Ensure we use the full audio data from DB, not the potentially empty one from props
             audioData: fullSong.audioData 
         };
         
@@ -67,11 +71,75 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
         onSave: handleSave
     });
 
+    // --- Live Recording Logic ---
+    useEffect(() => {
+        const currentKeys = song.laneCount === 4 ? keyConfig.k4 : keyConfig.k6;
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (!isRecording || !editor.isPlaying || e.repeat) return;
+            const key = e.key.toLowerCase();
+            const laneIndex = currentKeys.indexOf(key);
+            
+            if (laneIndex !== -1) {
+                // Record start time using high-precision getter
+                activeRecordingLanes.current[laneIndex] = editor.getExactTime();
+            }
+        };
+
+        const handleKeyUp = (e: KeyboardEvent) => {
+             // We allow finishing a note even if recording stops mid-hold, but requires active state
+             if (!isRecording && !editor.isPlaying) {
+                 activeRecordingLanes.current = {}; // Clear stuck notes
+                 return;
+             }
+
+             const key = e.key.toLowerCase();
+             const laneIndex = currentKeys.indexOf(key);
+             
+             if (laneIndex !== -1) {
+                 const startTime = activeRecordingLanes.current[laneIndex];
+                 if (startTime !== undefined) {
+                     const endTime = editor.getExactTime();
+                     const rawDuration = Math.max(0, endTime - startTime);
+                     
+                     // Add Note via Hook (Snap logic handled inside addNote if recordSnap is true)
+                     // If recordSnap is true, passing 'true' to addNote will snap Start and End.
+                     // The requirement is "Long press will generate Hold, will not generate Catch".
+                     
+                     // If rawDuration is very short (tap), addNote logic might make it 0 duration if snapped start == snapped end.
+                     // We trust addNote to handle the math.
+                     
+                     editor.addNote(startTime, laneIndex, rawDuration, 'NORMAL', recordSnap);
+                     
+                     delete activeRecordingLanes.current[laneIndex];
+                 }
+             }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+        };
+    }, [isRecording, editor.isPlaying, keyConfig, song.laneCount, recordSnap]);
+
+
     const handleExitRequest = () => {
         if (editor.hasUnsavedChanges) {
             setShowExitConfirm(true);
         } else {
             onExit();
+        }
+    };
+
+    const toggleRecording = () => {
+        if (isRecording) {
+            setIsRecording(false);
+            if (editor.isPlaying) editor.togglePlay();
+        } else {
+            setIsRecording(true);
+            if (!editor.isPlaying) editor.togglePlay();
         }
     };
 
@@ -157,7 +225,26 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
 
                     <div className="h-5 w-px bg-white/10"></div>
 
-                    {/* Playback Controls */}
+                    {/* Record & Play Controls */}
+                    <div className="flex items-center gap-2">
+                        <button 
+                            onClick={toggleRecording}
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all ${isRecording ? 'bg-red-500 text-white border-red-500 animate-pulse' : 'bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20'}`}
+                            title="录制模式 (跟随播放按键输入)"
+                        >
+                            <Circle className={`w-3 h-3 ${isRecording ? 'fill-current' : ''}`} />
+                            {isRecording && <span className="text-xs font-bold">REC</span>}
+                        </button>
+
+                        <button 
+                            onClick={() => setRecordSnap(!recordSnap)}
+                            className={`p-1.5 rounded-full border transition-all ${recordSnap ? 'bg-neon-blue/20 border-neon-blue text-neon-blue' : 'bg-gray-800 border-gray-700 text-gray-500'}`}
+                            title={`录制吸附: ${recordSnap ? '开' : '关'}`}
+                        >
+                            <Magnet className="w-3.5 h-3.5" />
+                        </button>
+                    </div>
+
                     <button 
                         onClick={editor.togglePlay} 
                         className={`w-8 h-8 flex items-center justify-center rounded-full border transition-all hover:scale-105 active:scale-95 ${editor.isPlaying ? 'bg-yellow-500/20 border-yellow-500 text-yellow-500' : 'bg-green-500/20 border-green-500 text-green-500'}`}
@@ -290,6 +377,20 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
 
                         <hr className="border-white/5 my-4" />
 
+                        {/* Recording Info */}
+                         {isRecording && (
+                             <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl animate-pulse">
+                                 <h3 className="text-red-400 font-bold text-xs uppercase mb-2 flex items-center gap-2">
+                                     <Mic className="w-3 h-3" /> 录制中
+                                 </h3>
+                                 <p className="text-[10px] text-gray-400 leading-relaxed">
+                                     按下对应轨道键 ({song.laneCount === 4 ? 'D F J K' : 'S D F J K L'}) 实时输入。<br/>
+                                     <span className="text-white">长按</span>自动生成长条。<br/>
+                                     当前吸附：<span className={recordSnap ? 'text-neon-blue' : 'text-gray-500'}>{recordSnap ? '开启' : '关闭'}</span>
+                                 </p>
+                             </div>
+                         )}
+
                         {/* View Settings */}
                         <div className="space-y-3">
                             <div className="flex justify-between items-center text-xs text-gray-400">
@@ -324,7 +425,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
                 </div>
 
                 {/* Canvas Area */}
-                <div className="flex-1 relative bg-[#050505] shadow-inner">
+                <div className={`flex-1 relative bg-[#050505] shadow-inner ${isRecording ? 'ring-2 ring-inset ring-red-500/50' : ''}`}>
                      <EditorCanvas 
                         notes={editor.notes}
                         currentTime={editor.currentTime}
@@ -342,6 +443,11 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
                         onNoteRightClick={editor.deleteNote}
                         getSnapTime={editor.getSnapTime}
                      />
+                     {isRecording && (
+                         <div className="absolute top-4 right-4 bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full animate-pulse shadow-lg pointer-events-none">
+                             REC
+                         </div>
+                     )}
                 </div>
             </div>
 

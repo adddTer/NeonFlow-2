@@ -37,8 +37,6 @@ export const useSongGenerator = (
     const [beatmapFeatures, setBeatmapFeatures] = useState({ normal: true, holds: true, catch: true });
     const [skipAI, setSkipAI] = useState(false);
 
-    // No Worker Ref needed anymore
-
     const onFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (!file) return;
@@ -48,9 +46,11 @@ export const useSongGenerator = (
         event.target.value = '';
     };
 
-    const handleCreateBeatmap = async () => {
+    const handleCreateBeatmap = async (options?: { empty?: boolean }) => {
         if (!pendingFile) return;
-        if (!selectedDifficulty) return;
+        // In empty mode, difficulty is optional (defaulting to Normal for ID purposes if null)
+        const isEmptyMode = options?.empty === true;
+        if (!isEmptyMode && !selectedDifficulty) return;
         
         setIsConfiguringSong(false);
         const file = pendingFile;
@@ -61,7 +61,6 @@ export const useSongGenerator = (
             setLoadingStage("正在解析音频");
             setLoadingSubText("分析频率与节奏特征...");
             
-            // Allow UI to render the loading state before heavy lifting
             await new Promise(resolve => setTimeout(resolve, 100));
 
             const arrayBuffer = await file.arrayBuffer();
@@ -77,19 +76,18 @@ export const useSongGenerator = (
             let aiMetadata: { title?: string, artist?: string, album?: string } | undefined;
 
             const isDebugAndNoKey = isDebugMode && apiKeyStatus !== 'valid';
-            const shouldUseFallback = (isDebugMode && skipAI) || isDebugAndNoKey;
+            const shouldUseFallback = (skipAI) || isDebugAndNoKey; // Logic handles both manual skip and debug skip
 
             if (shouldUseFallback) {
-                setLoadingStage(isDebugAndNoKey ? "无 API Key：使用默认结构" : "调试模式：跳过 AI");
-                setLoadingSubText("使用默认结构生成...");
+                setLoadingStage(isEmptyMode ? "创建空白谱面" : (isDebugAndNoKey ? "无 API Key：使用默认结构" : "跳过 AI 分析"));
+                setLoadingSubText("使用默认配置...");
                 await new Promise(resolve => setTimeout(resolve, 500));
                 structure = { bpm: 120, sections: [{ startTime: 0, endTime: decodedBuffer.duration, type: 'verse', intensity: 0.8, style: 'stream' }] };
-                aiMetadata = { title: file.name.replace(/\.[^/.]+$/, "") + " [DEV]", artist: "Debug Mode" };
+                aiMetadata = { title: file.name.replace(/\.[^/.]+$/, ""), artist: "Unknown Artist" };
             } else {
-                setLoadingStage("Gemini AI 构思中");
-                setLoadingSubText("识别风格、结构与视觉主题...");
+                setLoadingStage("Gemini AI 分析中");
+                setLoadingSubText("识别 BPM、结构与视觉主题...");
                 
-                // Allow UI to render
                 await new Promise(resolve => setTimeout(resolve, 50));
 
                 if (apiKeyStatus === 'valid') {
@@ -104,34 +102,34 @@ export const useSongGenerator = (
                 }
             }
 
-            setLoadingStage("谱面生成中");
-            setLoadingSubText(`正在构建 ${selectedLaneCount}K 模式键位...`);
-            
-            // Give the browser a moment to update the Loading Screen text before freezing for calculation
-            await new Promise(resolve => setTimeout(resolve, 100));
+            let finalNotes: Note[] = [];
+            let rating = 0;
 
-            // --- MAIN THREAD EXECUTION ---
-            // Direct function calls instead of Worker postMessage
-            // This ensures 100% compatibility at the cost of slight UI freeze during this block
-            
-            // 1. Compute Onsets
-            const onsets = computeOnsets(lowData, fullData, decodedBuffer.sampleRate);
-            
-            // 2. Generate Map
-            const finalNotes = generateBeatmap(
-                onsets,
-                structure,
-                selectedDifficulty,
-                selectedLaneCount,
-                selectedPlayStyle,
-                beatmapFeatures
-            );
-            
-            if (!finalNotes || finalNotes.length === 0) throw new Error("GenerativeFailure");
-            
-            // Dynamic import to avoid circular dependency issues in some bundlers if logic is shared
-            const { calculateDifficultyRating } = await import('../utils/beatmapGenerator');
-            const rating = calculateDifficultyRating(finalNotes, decodedBuffer.duration);
+            if (!isEmptyMode) {
+                setLoadingStage("谱面生成中");
+                setLoadingSubText(`正在构建 ${selectedLaneCount}K 模式键位...`);
+                await new Promise(resolve => setTimeout(resolve, 100));
+
+                const onsets = computeOnsets(lowData, fullData, decodedBuffer.sampleRate);
+                
+                finalNotes = generateBeatmap(
+                    onsets,
+                    structure,
+                    selectedDifficulty!,
+                    selectedLaneCount,
+                    selectedPlayStyle,
+                    beatmapFeatures
+                );
+                
+                if (!finalNotes || finalNotes.length === 0) throw new Error("GenerativeFailure");
+                
+                const { calculateDifficultyRating } = await import('../utils/beatmapGenerator');
+                rating = calculateDifficultyRating(finalNotes, decodedBuffer.duration);
+            } else {
+                 setLoadingStage("初始化编辑器");
+                 setLoadingSubText("准备空白轨道...");
+                 await new Promise(resolve => setTimeout(resolve, 100));
+            }
 
             setLoadingStage("保存数据");
             setLoadingSubText("写入本地数据库...");
@@ -150,11 +148,11 @@ export const useSongGenerator = (
                 structure: structure as any,
                 theme: aiTheme,
                 difficultyRating: rating,
-                laneCount: selectedDifficulty === BeatmapDifficulty.Titan ? 6 : selectedLaneCount
+                laneCount: (!selectedDifficulty || selectedDifficulty === BeatmapDifficulty.Titan) ? 6 : selectedLaneCount
             };
 
             await saveSong(newSong);
-            onSuccess(); // Triggers library reload
+            onSuccess(); 
             
             setLoadingStage("");
             setLoadingSubText("");
@@ -185,7 +183,6 @@ export const useSongGenerator = (
         errorMessage, setErrorMessage,
         onFileSelect,
         handleCreateBeatmap,
-        // Config State
         selectedLaneCount, setSelectedLaneCount,
         selectedPlayStyle, setSelectedPlayStyle,
         selectedDifficulty, setSelectedDifficulty,

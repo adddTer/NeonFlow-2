@@ -52,6 +52,17 @@ export const useChartEditor = ({
         return Math.round(time / snapInterval) * snapInterval;
     }, [beatDuration, snapDivisor]);
 
+    // High Precision Time Getter for Recording
+    const getExactTime = useCallback(() => {
+        // If playing, calculate time based on AudioContext to avoid React state lag
+        if (isPlaying && audioContextRef.current) {
+            const now = audioContextRef.current.currentTime;
+            const elapsed = (now - startTimeRef.current) * playbackRate;
+            return startOffsetRef.current + elapsed;
+        }
+        return currentTime;
+    }, [isPlaying, currentTime, playbackRate]);
+
     // -- Audio Control --
     const togglePlay = useCallback(() => {
         if (isPlaying) {
@@ -121,24 +132,27 @@ export const useChartEditor = ({
 
     // -- Note Manipulation --
     
-    // Enhanced addNote to support Hold dragging
-    const addNote = (time: number, lane: number, duration: number = 0, type: NoteType = 'NORMAL') => {
-        const snappedTime = getSnapTime(time);
-        // Also snap duration end if it's a hold
+    // Enhanced addNote to support Hold dragging and optional snap
+    const addNote = (time: number, lane: number, duration: number = 0, type: NoteType = 'NORMAL', snap: boolean = true) => {
+        const startTime = snap ? getSnapTime(time) : time;
+        
         let finalDuration = duration;
         if (duration > 0) {
-            const rawEndTime = snappedTime + duration;
-            const snappedEndTime = getSnapTime(rawEndTime);
-            finalDuration = Math.max(0, snappedEndTime - snappedTime);
+            const rawEndTime = startTime + duration;
+            // For holds, we typically snap the end time too if snap is enabled
+            if (snap) {
+                const snappedEndTime = getSnapTime(rawEndTime);
+                finalDuration = Math.max(0, snappedEndTime - startTime);
+            }
         }
 
         // Check for exact duplicate
-        const exists = notes.some(n => Math.abs(n.time - snappedTime) < 0.001 && n.lane === lane);
+        const exists = notes.some(n => Math.abs(n.time - startTime) < 0.001 && n.lane === lane);
         if (exists) return;
 
         const newNote: Note = {
             id: crypto.randomUUID(),
-            time: snappedTime,
+            time: startTime,
             lane: lane as NoteLane,
             type: type,
             duration: finalDuration,
@@ -213,6 +227,7 @@ export const useChartEditor = ({
         toggleSelection,
         saveChanges,
         
-        getSnapTime // Exported for canvas use
+        getSnapTime,
+        getExactTime
     };
 };

@@ -72,9 +72,9 @@ function App() {
 
   // --- Logic Wrappers ---
 
-  const executeCreateBeatmap = async () => {
+  const executeCreateBeatmap = async (options?: { empty?: boolean }) => {
       setStatus(GameStatus.Analyzing); // Show loading screen immediately
-      const result = await handleCreateBeatmap();
+      const result = await handleCreateBeatmap(options);
       if (result?.success) {
           setStatus(GameStatus.Library);
           setSongName(result.songTitle || "");
@@ -306,7 +306,7 @@ function App() {
         <SongConfigModal 
             file={pendingFile}
             onCancel={() => { setPendingFile(null); setIsConfiguringSong(false); }}
-            onConfirm={() => selectedDifficulty && executeCreateBeatmap()}
+            onConfirm={executeCreateBeatmap}
             laneCount={selectedLaneCount} setLaneCount={setSelectedLaneCount}
             playStyle={selectedPlayStyle} setPlayStyle={setSelectedPlayStyle}
             difficulty={selectedDifficulty} setDifficulty={setSelectedDifficulty}
@@ -376,7 +376,8 @@ function App() {
             <EditorScreen 
                 song={editingSong} 
                 onExit={handleEditorExit} 
-                onSaveSuccess={handleEditorSave} 
+                onSaveSuccess={handleEditorSave}
+                keyConfig={keyConfig}
             />
         )}
 
