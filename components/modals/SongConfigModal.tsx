@@ -174,7 +174,7 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                                         </div>
                                         <div className="flex flex-col">
                                             <span className="text-gray-200 font-bold text-sm">启用 AI 辅助分析</span>
-                                            <span className="text-[10px] text-gray-500">自动检测 BPM、曲名及生成视觉主题 (强制)</span>
+                                            <span className="text-[10px] text-gray-500">自动检测 BPM、曲名及生成视觉主题</span>
                                         </div>
                                     </div>
                                 </div>
