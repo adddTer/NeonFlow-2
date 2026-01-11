@@ -1,10 +1,11 @@
 
 import React, { useState, useRef, useMemo, useEffect } from 'react';
-import { Upload, Play, Trash2, Edit2, Download, CheckSquare, Square, Music, Clock, Zap, Plus, FileJson, Trophy, Layers, Lock, Disc, Info, X, Calendar, Activity, Loader2, AlertTriangle, PlayCircle, MoreHorizontal, Heart, ArrowUpDown, Search, SortAsc, ChevronDown, Filter, Edit3, Type } from 'lucide-react';
-import { SavedSong } from '../../types';
+import { Upload, Play, Trash2, Edit2, Download, CheckSquare, Square, Music, Clock, Zap, Plus, FileJson, Trophy, Layers, Lock, Disc, Info, X, Calendar, Activity, Loader2, AlertTriangle, PlayCircle, MoreHorizontal, Heart, ArrowUpDown, Search, SortAsc, ChevronDown, Filter, Edit3, Type, Album, CloudDownload } from 'lucide-react';
+import { SavedSong, GameStatus } from '../../types';
 import { deleteSong, updateSongMetadata, exportSongAsZip, toggleFavorite } from '../../services/storageService';
 import { calculateAccuracy, calculateRating } from '../../utils/scoring';
 import { SongDetailsModal } from '../library/SongDetailsModal';
+import { useSongLibrary } from '../../hooks/useSongLibrary'; 
 
 const formatTime = (seconds: number) => {
   const m = Math.floor(seconds / 60);
@@ -35,7 +36,11 @@ const SORT_LABELS: Record<SortOption, { label: string, icon: React.ReactNode }> 
     'TITLE_ASC': { label: '歌名 (A-Z)', icon: <SortAsc className="w-3.5 h-3.5" /> },
 };
 
-export const LibraryScreen: React.FC<LibraryScreenProps> = ({
+interface LibraryScreenPropsWithDemo extends LibraryScreenProps {
+    onInstallDemo?: () => void;
+}
+
+export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
   songs,
   onImportAudioClick,
   onImportMapClick,
@@ -45,7 +50,8 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
   isLoading,
   hasApiKey,
   onOpenSettings,
-  onOpenProfile
+  onOpenProfile,
+  onInstallDemo
 }) => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSelectionMode, setIsSelectionMode] = useState(false);
@@ -68,6 +74,9 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
 
   // Delete Confirm Modal State
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Demo Confirm Modal State
+  const [showDemoConfirm, setShowDemoConfirm] = useState(false);
 
   const audioInputRef = useRef<HTMLInputElement>(null);
   const mapInputRef = useRef<HTMLInputElement>(null);
@@ -376,158 +385,189 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
 
       {/* Main Grid Content */}
       <div className="flex-1 overflow-y-auto custom-scrollbar px-4 md:px-6 pb-24">
-          {processedSongs.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-gray-500 opacity-60">
-                  <Disc className="w-16 h-16 mb-4 animate-spin-slow" />
-                  <p className="text-lg font-bold">没有找到曲目</p>
-                  <p className="text-sm">{searchQuery || filterFavorites ? "尝试清除搜索或筛选条件" : "导入或创建新的乐谱以开始游戏"}</p>
-              </div>
-          ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6">
-                  {processedSongs.map(song => {
-                      const levelInfo = (song as any)._displayLevel || getLevelDisplay(song.difficultyRating);
-                      const secondaryColor = song.theme?.secondaryColor || '#222';
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6">
+              
+              {/* Special Demo Album Card - Temporarily Hidden */}
+              {false && onInstallDemo && !filterFavorites && !searchQuery && (
+                  <div 
+                      onClick={() => setShowDemoConfirm(true)}
+                      className="group relative aspect-[4/3] rounded-3xl overflow-hidden border border-indigo-500/30 hover:border-indigo-400 cursor-pointer bg-gradient-to-br from-indigo-900 to-black hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(99,102,241,0.2)] transition-all duration-300"
+                  >
+                      {/* Animated Background */}
+                      <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20"></div>
+                      <div className="absolute -top-20 -right-20 w-64 h-64 bg-indigo-500/20 rounded-full blur-[80px] group-hover:bg-indigo-400/30 transition-colors"></div>
+                      <div className="absolute -bottom-20 -left-20 w-64 h-64 bg-purple-500/20 rounded-full blur-[80px] group-hover:bg-purple-400/30 transition-colors"></div>
                       
-                      return (
-                          <div 
-                             key={song.id}
-                             onClick={(e) => isSelectionMode ? toggleSelection(song.id, e) : onSelectSong(song)}
-                             className={`group relative aspect-[4/3] rounded-3xl overflow-hidden border transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl cursor-pointer bg-[#0a0a0a] transform-gpu
-                                ${selectedIds.has(song.id) ? 'border-neon-blue ring-2 ring-neon-blue/50' : 'border-white/5 hover:border-white/20'}
-                             `}
-                             style={{ isolation: 'isolate' }}
-                          >
-                             {/* Cover Art Container */}
-                             <div className="absolute inset-0 z-0 bg-black">
-                                 {song.coverArt ? (
-                                    <>
-                                        <img 
-                                            src={song.coverArt} 
-                                            alt="cover" 
-                                            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
-                                        />
-                                        {/* Gradient Overlay - strictly positioned over image */}
-                                        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent pointer-events-none"></div>
-                                    </>
-                                 ) : (
-                                    // Fallback
-                                    <div 
-                                        className="w-full h-full relative overflow-hidden"
-                                        style={{ background: `linear-gradient(135deg, ${secondaryColor}, #000)` }}
-                                    >
-                                        <div className="absolute inset-0 flex items-center justify-center opacity-30">
-                                             <div className="relative">
-                                                 <Disc className="w-24 h-24 text-white animate-spin-slow" style={{ animationDuration: '8s' }} />
-                                                 <Music className="w-8 h-8 text-white absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 drop-shadow-lg" />
-                                             </div>
-                                        </div>
-                                        <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-80 pointer-events-none"></div>
-                                    </div>
-                                 )}
-                             </div>
-                             
-                             {/* Content Layer (Higher Z-Index) */}
-                             <div className="absolute inset-0 z-10 pointer-events-none p-5 flex flex-col justify-between">
-                                 {/* Top Section */}
-                                 <div className="flex justify-between items-start">
-                                     {/* Level Badge */}
-                                     <div className="flex flex-col items-center">
-                                         <div 
-                                            className="w-12 h-12 rounded-xl flex items-center justify-center backdrop-blur-md border border-white/10 shadow-lg bg-black/40"
-                                            style={{ borderColor: levelInfo.color }}
-                                         >
-                                             <span className="font-black italic text-xl text-white drop-shadow-md" style={{ color: levelInfo.color }}>{levelInfo.val}</span>
-                                         </div>
-                                     </div>
-
-                                     {/* Top Right Controls (Pointer events enabled for buttons) */}
-                                     {!isSelectionMode && (
-                                         <div className="flex gap-2 pointer-events-auto">
-                                             {/* Favorite Button (Always visible if favorited, else on hover) */}
-                                             <button 
-                                                onClick={(e) => handleToggleFavorite(song.id, e)}
-                                                className={`p-2 backdrop-blur-md rounded-lg border transition-all ${song.isFavorite ? 'bg-neon-pink/20 border-neon-pink text-neon-pink' : 'bg-black/40 border-white/5 text-white hover:bg-white/20 opacity-0 group-hover:opacity-100'}`}
-                                             >
-                                                 <Heart className={`w-4 h-4 ${song.isFavorite ? 'fill-current' : ''}`} />
-                                             </button>
-
-                                             <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
-                                                 <button 
-                                                    onClick={(e) => { e.stopPropagation(); setShowDetailsId(song.id); }}
-                                                    className="p-2 bg-black/40 backdrop-blur-md rounded-lg text-white hover:bg-white/20 border border-white/5"
-                                                    title="详情"
-                                                 >
-                                                     <Info className="w-4 h-4" />
-                                                 </button>
-                                                 {/* Removed Edit Button Here as requested */}
-                                                 <button 
-                                                    onClick={(e) => startEdit(song, e)}
-                                                    className="p-2 bg-black/40 backdrop-blur-md rounded-lg text-white hover:bg-white/20 border border-white/5"
-                                                    title="重命名"
-                                                 >
-                                                     <Type className="w-4 h-4" />
-                                                 </button>
-                                             </div>
-                                         </div>
-                                     )}
-                                     
-                                     {/* Selection Checkbox */}
-                                     {isSelectionMode && (
-                                         <div className="pointer-events-auto">
-                                             <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-colors ${selectedIds.has(song.id) ? 'bg-neon-blue border-neon-blue text-black' : 'border-white/30 bg-black/40'}`}>
-                                                 {selectedIds.has(song.id) && <CheckSquare className="w-4 h-4" />}
-                                             </div>
-                                         </div>
-                                     )}
-                                 </div>
-
-                                 {/* Middle Rank (Centered) */}
-                                 {song.bestResult && (
-                                     <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none w-full text-center">
-                                         <div className={`text-6xl font-black italic drop-shadow-[0_0_30px_rgba(0,0,0,0.8)] opacity-30 group-hover:opacity-100 transition-all duration-500 scale-75 group-hover:scale-100 ${song.bestResult.rank === 'S' || song.bestResult.rank === 'OPUS' || song.bestResult.rank === 'DIVINE' ? 'text-neon-blue' : 'text-white'}`}>
-                                             {song.bestResult.rank}
-                                         </div>
-                                     </div>
-                                 )}
-
-                                 {/* Bottom Info */}
-                                 <div className="pointer-events-auto">
-                                     {editingId === song.id ? (
-                                          <div className="flex flex-col gap-2 bg-black/80 p-2 rounded-xl backdrop-blur-md" onClick={e => e.stopPropagation()}>
-                                              <input 
-                                                className="bg-transparent border-b border-white/20 text-white font-bold text-lg outline-none"
-                                                value={editForm.title}
-                                                onChange={e => setEditForm({...editForm, title: e.target.value})}
-                                                autoFocus
-                                              />
-                                              <div className="flex gap-2">
-                                                  <input 
-                                                    className="flex-1 bg-transparent border-b border-white/20 text-gray-400 text-xs outline-none"
-                                                    value={editForm.artist}
-                                                    onChange={e => setEditForm({...editForm, artist: e.target.value})}
-                                                  />
-                                                  <button onClick={saveEdit} className="text-xs bg-neon-blue text-black px-2 rounded font-bold">SAVE</button>
-                                              </div>
-                                          </div>
-                                     ) : (
-                                         <>
-                                            <h3 className="text-xl font-black text-white leading-tight truncate drop-shadow-md mb-1">{song.title}</h3>
-                                            <p className="text-xs text-white/70 font-bold uppercase tracking-wider mb-3 truncate">{song.artist}</p>
-                                            
-                                            <div className="flex items-center gap-3 text-[10px] font-bold text-white/50 uppercase tracking-widest">
-                                                <span className="flex items-center gap-1"><Clock className="w-3 h-3"/> {formatTime(song.duration)}</span>
-                                                <span className="w-1 h-1 bg-white/20 rounded-full"></span>
-                                                <span>{Math.round(song.structure.bpm)} BPM</span>
-                                                <span className="w-1 h-1 bg-white/20 rounded-full"></span>
-                                                <span className={`${song.laneCount === 6 ? 'text-purple-400' : 'text-neon-blue'}`}>{song.laneCount}K</span>
-                                            </div>
-                                         </>
-                                     )}
-                                 </div>
-                             </div>
+                      {/* Content */}
+                      <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 z-10">
+                          <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center mb-4 backdrop-blur-md border border-white/20 shadow-lg group-hover:scale-110 transition-transform">
+                              <CloudDownload className="w-8 h-8 text-indigo-300" />
                           </div>
-                      );
-                  })}
+                          <h3 className="text-2xl font-black text-white mb-1 drop-shadow-lg">万象回响</h3>
+                          <p className="text-xs text-indigo-200 font-bold uppercase tracking-widest mb-4">官方演示专辑</p>
+                          <div className="px-4 py-1.5 bg-white/10 rounded-full text-[10px] font-bold text-white border border-white/10 group-hover:bg-white/20 transition-colors">
+                              点击加载资源 (15首)
+                          </div>
+                      </div>
+                  </div>
+              )}
+
+              {processedSongs.map(song => {
+                  const levelInfo = (song as any)._displayLevel || getLevelDisplay(song.difficultyRating);
+                  const secondaryColor = song.theme?.secondaryColor || '#222';
+                  
+                  return (
+                      <div 
+                         key={song.id}
+                         onClick={(e) => isSelectionMode ? toggleSelection(song.id, e) : onSelectSong(song)}
+                         className={`group relative aspect-[4/3] rounded-3xl overflow-hidden border transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl cursor-pointer bg-[#0a0a0a] transform-gpu
+                            ${selectedIds.has(song.id) ? 'border-neon-blue ring-2 ring-neon-blue/50' : 'border-white/5 hover:border-white/20'}
+                         `}
+                         style={{ isolation: 'isolate' }}
+                      >
+                         {/* Cover Art Container */}
+                         <div className="absolute inset-0 z-0 bg-black">
+                             {song.coverArt ? (
+                                <>
+                                    <img 
+                                        src={song.coverArt} 
+                                        alt="cover" 
+                                        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
+                                    />
+                                    {/* Gradient Overlay - strictly positioned over image */}
+                                    <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent pointer-events-none"></div>
+                                </>
+                             ) : (
+                                // Fallback
+                                <div 
+                                    className="w-full h-full relative overflow-hidden"
+                                    style={{ background: `linear-gradient(135deg, ${secondaryColor}, #000)` }}
+                                >
+                                    <div className="absolute inset-0 flex items-center justify-center opacity-30">
+                                         <div className="relative">
+                                             <Disc className="w-24 h-24 text-white animate-spin-slow" style={{ animationDuration: '8s' }} />
+                                             <Music className="w-8 h-8 text-white absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 drop-shadow-lg" />
+                                         </div>
+                                    </div>
+                                    <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-80 pointer-events-none"></div>
+                                </div>
+                             )}
+                         </div>
+                         
+                         {/* Content Layer (Higher Z-Index) */}
+                         <div className="absolute inset-0 z-10 pointer-events-none p-5 flex flex-col justify-between">
+                             {/* Top Section */}
+                             <div className="flex justify-between items-start">
+                                 {/* Level Badge */}
+                                 <div className="flex flex-col items-center">
+                                     <div 
+                                        className="w-12 h-12 rounded-xl flex items-center justify-center backdrop-blur-md border border-white/10 shadow-lg bg-black/40"
+                                        style={{ borderColor: levelInfo.color }}
+                                     >
+                                         <span className="font-black italic text-xl text-white drop-shadow-md" style={{ color: levelInfo.color }}>{levelInfo.val}</span>
+                                     </div>
+                                 </div>
+
+                                 {/* Top Right Controls (Pointer events enabled for buttons) */}
+                                 {!isSelectionMode && (
+                                     <div className="flex gap-2 pointer-events-auto">
+                                         {/* Favorite Button (Always visible if favorited, else on hover) */}
+                                         <button 
+                                            onClick={(e) => handleToggleFavorite(song.id, e)}
+                                            className={`p-2 backdrop-blur-md rounded-lg border transition-all ${song.isFavorite ? 'bg-neon-pink/20 border-neon-pink text-neon-pink' : 'bg-black/40 border-white/5 text-white hover:bg-white/20 opacity-0 group-hover:opacity-100'}`}
+                                         >
+                                             <Heart className={`w-4 h-4 ${song.isFavorite ? 'fill-current' : ''}`} />
+                                         </button>
+
+                                         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
+                                             <button 
+                                                onClick={(e) => { e.stopPropagation(); setShowDetailsId(song.id); }}
+                                                className="p-2 bg-black/40 backdrop-blur-md rounded-lg text-white hover:bg-white/20 border border-white/5"
+                                                title="详情"
+                                             >
+                                                 <Info className="w-4 h-4" />
+                                             </button>
+                                             {/* Removed Edit Button Here as requested */}
+                                             <button 
+                                                onClick={(e) => startEdit(song, e)}
+                                                className="p-2 bg-black/40 backdrop-blur-md rounded-lg text-white hover:bg-white/20 border border-white/5"
+                                                title="重命名"
+                                             >
+                                                 <Type className="w-4 h-4" />
+                                             </button>
+                                         </div>
+                                     </div>
+                                 )}
+                                 
+                                 {/* Selection Checkbox */}
+                                 {isSelectionMode && (
+                                     <div className="pointer-events-auto">
+                                         <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-colors ${selectedIds.has(song.id) ? 'bg-neon-blue border-neon-blue text-black' : 'border-white/30 bg-black/40'}`}>
+                                             {selectedIds.has(song.id) && <CheckSquare className="w-4 h-4" />}
+                                         </div>
+                                     </div>
+                                 )}
+                             </div>
+
+                             {/* Middle Rank (Centered) */}
+                             {song.bestResult && (
+                                 <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none w-full text-center">
+                                     <div className={`text-6xl font-black italic drop-shadow-[0_0_30px_rgba(0,0,0,0.8)] opacity-30 group-hover:opacity-100 transition-all duration-500 scale-75 group-hover:scale-100 ${song.bestResult.rank === 'S' || song.bestResult.rank === 'OPUS' || song.bestResult.rank === 'DIVINE' ? 'text-neon-blue' : 'text-white'}`}>
+                                         {song.bestResult.rank}
+                                     </div>
+                                 </div>
+                             )}
+
+                             {/* Bottom Info */}
+                             <div className="pointer-events-auto">
+                                 {editingId === song.id ? (
+                                      <div className="flex flex-col gap-2 bg-black/80 p-2 rounded-xl backdrop-blur-md" onClick={e => e.stopPropagation()}>
+                                          <input 
+                                            className="bg-transparent border-b border-white/20 text-white font-bold text-lg outline-none"
+                                            value={editForm.title}
+                                            onChange={e => setEditForm({...editForm, title: e.target.value})}
+                                            autoFocus
+                                          />
+                                          <div className="flex gap-2">
+                                              <input 
+                                                className="flex-1 bg-transparent border-b border-white/20 text-gray-400 text-xs outline-none"
+                                                value={editForm.artist}
+                                                onChange={e => setEditForm({...editForm, artist: e.target.value})}
+                                              />
+                                              <button onClick={saveEdit} className="text-xs bg-neon-blue text-black px-2 rounded font-bold">SAVE</button>
+                                          </div>
+                                      </div>
+                                 ) : (
+                                     <>
+                                        <h3 className="text-xl font-black text-white leading-tight truncate drop-shadow-md mb-1">{song.title}</h3>
+                                        <p className="text-xs text-white/70 font-bold uppercase tracking-wider mb-3 truncate">{song.artist}</p>
+                                        
+                                        <div className="flex items-center gap-3 text-[10px] font-bold text-white/50 uppercase tracking-widest">
+                                            <span className="flex items-center gap-1"><Clock className="w-3 h-3"/> {formatTime(song.duration)}</span>
+                                            <span className="w-1 h-1 bg-white/20 rounded-full"></span>
+                                            <span>{Math.round(song.structure.bpm)} BPM</span>
+                                            <span className="w-1 h-1 bg-white/20 rounded-full"></span>
+                                            <span className={`${song.laneCount === 6 ? 'text-purple-400' : 'text-neon-blue'}`}>{song.laneCount}K</span>
+                                        </div>
+                                     </>
+                                 )}
+                             </div>
+                         </div>
+                      </div>
+                  );
+              })}
+          </div>
+          
+          {processedSongs.length === 0 && !onInstallDemo && (
+              <div className="h-64 flex flex-col items-center justify-center text-gray-500 opacity-60 gap-4">
+                  <div className="relative">
+                      <Disc className="w-16 h-16 animate-spin-slow" />
+                      <Music className="w-6 h-6 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+                  </div>
+                  <div className="text-center">
+                      <p className="text-lg font-bold text-white">曲库为空</p>
+                      <p className="text-sm">导入音乐开始创作</p>
+                  </div>
               </div>
           )}
       </div>
@@ -542,7 +582,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
             song={detailSong} 
             onClose={() => setShowDetailsId(null)} 
             onStart={(s) => { onSelectSong(s); setShowDetailsId(null); }} 
-            onEdit={(s) => { onEditSong(s); setShowDetailsId(null); }} // Pass Handler
+            onEdit={(s) => { onEditSong(s); setShowDetailsId(null); }} 
           />
       )}
 
@@ -604,6 +644,40 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
                         className="py-3 rounded-xl bg-red-500 text-white font-bold hover:bg-red-600 transition-colors shadow-lg"
                       >
                           删除
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* --- Demo Album Install Confirmation --- */}
+      {showDemoConfirm && (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+              <div className="bg-[#0f172a] border border-indigo-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl relative">
+                  <div className="flex items-center gap-3 text-indigo-400 font-black text-xl mb-4">
+                      <CloudDownload className="w-6 h-6" />
+                      安装演示专辑
+                  </div>
+                  <p className="text-gray-300 text-sm mb-6 leading-relaxed">
+                      即将下载并解压 <span className="text-white font-bold">"万象回响"</span> 专辑资源。<br/>
+                      这可能需要消耗少量流量。
+                  </p>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                      <button 
+                        onClick={() => setShowDemoConfirm(false)}
+                        className="py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold transition-colors"
+                      >
+                          取消
+                      </button>
+                      <button 
+                        onClick={() => {
+                            setShowDemoConfirm(false);
+                            if (onInstallDemo) onInstallDemo();
+                        }}
+                        className="py-3 rounded-xl bg-indigo-500 text-white font-bold hover:bg-indigo-600 transition-colors shadow-lg"
+                      >
+                          开始加载
                       </button>
                   </div>
               </div>

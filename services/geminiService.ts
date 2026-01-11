@@ -96,7 +96,8 @@ export const analyzeStructureWithGemini = async (
         - **RULE 2 (FORMAT):** If song has titles in multiple languages, format as: "[Main Language Title] [Sub Language Title]". 
         - **RULE 3 (PRIORITY):** Main Language Priority: Chinese > English > Japanese/Korean/Others. 
         - **RULE 4:** Do NOT translate titles yourself. Only use official dual titles found online.
-        - **RULE 5:** If you cannot identify the song, clean up the filename and use it.`;
+        - **RULE 5:** If you cannot identify the song, clean up the filename and use it.
+        - **CRITICAL RULE 6 (DO NOT TRUNCATE STYLIZED NAMES):** If the title contains stylized separators like "==" or "||" (e.g., "Name == Alias"), PRESERVE the full string. Do NOT truncate or split it. Example: "隐德来希 NAME == Entelechy" should remain "隐德来希 NAME == Entelechy", DO NOT shorten it to "隐德来希 Entelechy".`;
     }
 
     taskInstruction += `\nReturn strictly JSON. Only include fields for requested tasks.`;

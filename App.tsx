@@ -53,7 +53,7 @@ function App() {
   } = useAppSettings();
 
   const {
-    librarySongs, isLibraryLoading, loadLibrary, handleImportMap
+    librarySongs, isLibraryLoading, loadLibrary, handleImportMap, handleInstallDemo
   } = useSongLibrary();
 
   const {
@@ -91,6 +91,16 @@ function App() {
           setLoadingSubText(sub);
       });
       setStatus(GameStatus.Library);
+      setLoadingStage("");
+      setLoadingSubText("");
+  };
+
+  const executeInstallDemo = async () => {
+      // Wrapper to connect useSongLibrary's handler with loading screen state
+      await handleInstallDemo(setStatus, (stage, sub) => {
+          setLoadingStage(stage);
+          setLoadingSubText(sub);
+      });
       setLoadingStage("");
       setLoadingSubText("");
   };
@@ -369,6 +379,7 @@ function App() {
                 onEditSong={handleEditSong}
                 onRefreshLibrary={loadLibrary} onOpenSettings={() => setShowSettings(true)}
                 onOpenProfile={() => setShowProfile(true)}
+                onInstallDemo={executeInstallDemo} // Pass handler
             />
         )}
 
@@ -552,7 +563,7 @@ function App() {
 
       {!isGameActive && status !== GameStatus.Editing && (
           <footer className="p-4 md:p-6 text-center text-[8px] md:text-[10px] text-gray-700 uppercase tracking-[0.2em] bg-[#030304] shrink-0 border-t border-white/5 select-none" onClick={handleVersionClick}>
-             <p className="flex items-center justify-center gap-2">NeonFlow v2.0 • AI Rhythm Engine {isDebugMode && <span className="text-red-500 font-bold flex items-center gap-1"><Bug className="w-3 h-3"/> DEV MODE</span>}</p>
+             <p className="flex items-center justify-center gap-2">NeonFlow v2.1 • AI Rhythm Engine {isDebugMode && <span className="text-red-500 font-bold flex items-center gap-1"><Bug className="w-3 h-3"/> DEV MODE</span>}</p>
           </footer>
       )}
     </div>

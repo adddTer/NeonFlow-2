@@ -1,4 +1,3 @@
-
 import React, { useMemo } from 'react';
 import { X, Trophy, Music, Activity, Target, Zap, Clock, Star } from 'lucide-react';
 import { SavedSong } from '../../types';
@@ -121,7 +120,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ songs, onClose }) =>
                         <div className="bg-black/40 rounded-2xl p-6 border border-white/5 flex flex-wrap justify-around items-end gap-4 h-48 relative">
                              {['OPUS', 'DIVINE', 'S', 'A', 'B', 'C', 'D'].map(rank => {
                                  const count = stats.rankCounts[rank] || 0;
-                                 const max = Math.max(...Object.values(stats.rankCounts), 1);
+                                 const max = Math.max(...(Object.values(stats.rankCounts) as number[]), 1);
                                  const height = Math.max((count / max) * 100, 5); // Min 5% height
                                  
                                  let color = 'bg-gray-700';
