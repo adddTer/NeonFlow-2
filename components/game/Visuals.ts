@@ -11,35 +11,41 @@ export class Particle {
   constructor(x: number, y: number, color: string) {
     this.x = x;
     this.y = y;
+    // Fast pseudo-random spread
     const angle = Math.random() * Math.PI * 2;
-    const speed = Math.random() * 4 + 2;
+    const speed = Math.random() * 3 + 2;
     this.vx = Math.cos(angle) * speed;
     this.vy = Math.sin(angle) * speed;
     this.life = 1.0;
     this.color = color;
-    this.size = Math.random() * 4 + 2;
+    // Smaller random sizes for performance
+    this.size = Math.random() * 2 + 2;
   }
 
   update() {
     this.x += this.vx;
     this.y += this.vy;
-    this.vy += 0.15; // Gravity
-    this.life -= 0.05; // Faster Decay for performance
-    this.size *= 0.95;
+    this.vy += 0.2; // Gravity
+    this.life -= 0.04; // Slower decay for better persistence visual
   }
 
   draw(ctx: CanvasRenderingContext2D) {
     if (this.life <= 0) return;
+    
+    // Optimization: avoid globalAlpha if possible, but for particles it's needed
     ctx.globalAlpha = this.life;
     ctx.fillStyle = this.color;
-    ctx.fillRect(this.x - this.size / 2, this.y - this.size / 2, this.size, this.size);
+    
+    // CRITICAL: Use fillRect instead of arc for massive mobile performance gain
+    ctx.fillRect(this.x - this.size/2, this.y - this.size/2, this.size, this.size);
+    
     ctx.globalAlpha = 1.0;
   }
 }
 
 export interface GhostNote {
     lane: number;
-    timeDiff: number; // relative time (noteTime - hitTime)
+    timeDiff: number; 
     life: number;
 }
 
