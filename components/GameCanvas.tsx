@@ -1,5 +1,5 @@
 
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Note, ScoreState, GameStatus, AITheme, LaneCount, NoteLane, SongStructure, GameModifier } from '../types';
 import { useSoundSystem } from '../hooks/useSoundSystem';
 import { Particle, GhostNote, HitEffect } from './game/Visuals';
@@ -22,12 +22,17 @@ interface GameCanvasProps {
 }
 
 const BASE_TARGET_WIDTH = 100; 
+
+// --- New Scoring Constants ---
+const MAX_SCORE = 1000000;
+const ACC_WEIGHT = 0.9;   // 900,000 points for Accuracy
+const COMBO_WEIGHT = 0.1; // 100,000 points for Combo
+
+// Hit Windows
 const BASE_HIT_WINDOW_PERFECT = 0.050; 
 const BASE_HIT_WINDOW_GOOD = 0.120; 
 const BASE_HIT_WINDOW_CATCH = 0.100;
-const SCORE_BASE_PERFECT = 1000;
-const SCORE_BASE_GOOD = 500;
-const SCORE_HOLD_TICK = 20; 
+
 const LEAD_IN_TIME = 2.0; 
 
 const GameCanvas: React.FC<GameCanvasProps> = ({ 
@@ -41,11 +46,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
   const startTimeRef = useRef<number>(0);
   
-  // Cache for performance
   const sizeRef = useRef({ width: 0, height: 0, dpr: 1 });
   const isMobileRef = useRef(false);
 
-  // Game State Refs
   const notesRef = useRef<Note[]>([]);
   const scoreRef = useRef<ScoreState>({ score: 0, combo: 0, maxCombo: 0, perfect: 0, good: 0, miss: 0, hitHistory: [], modifiers: [] });
   const keyStateRef = useRef<boolean[]>([]);
@@ -57,7 +60,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const comboScaleRef = useRef<number>(1.0);
   const hasEndedRef = useRef(false);
   
-  // Mod Specific Refs
   const playbackRateRef = useRef<number>(1.0);
   const hitWindowMultiplierRef = useRef<number>(1.0);
   const isAutoRef = useRef<boolean>(false);
@@ -65,10 +67,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const isHiddenRef = useRef<boolean>(false);
   const isFlashlightRef = useRef<boolean>(false);
 
-  // Visual Smoothing Refs
   const smoothedIntensityRef = useRef<number>(0);
 
-  // Layout & Config Refs
   const laneCountRef = useRef<LaneCount>(4);
   const keysRef = useRef<string[]>([]);
   const labelsRef = useRef<string[]>([]);
@@ -79,7 +79,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
   const { playHitSound } = useSoundSystem();
 
-  // --- Mod Logic Initialization ---
   useEffect(() => {
       if (modifiers.includes(GameModifier.DoubleTime)) playbackRateRef.current = 1.5;
       else if (modifiers.includes(GameModifier.HalfTime)) playbackRateRef.current = 0.75;
@@ -103,17 +102,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       return (realTimeElapsed * playbackRateRef.current) - (audioOffset / 1000) - (outputLatency + baseLatency);
   };
 
-  const getScoreMultiplier = () => {
-      let mult = 1.0;
-      if (modifiers.includes(GameModifier.DoubleTime)) mult *= 1.2;
-      if (modifiers.includes(GameModifier.HalfTime)) mult *= 0.5;
-      if (modifiers.includes(GameModifier.HardRock)) mult *= 1.1;
-      if (modifiers.includes(GameModifier.Hidden)) mult *= 1.06;
-      if (modifiers.includes(GameModifier.Flashlight)) mult *= 1.12;
-      if (modifiers.includes(GameModifier.Auto)) mult = 0;
-      return mult;
-  };
-
   const processHit = (lane: number) => {
     if (!audioContextRef.current) return;
     const gameTime = getCurrentGameTime();
@@ -129,16 +117,24 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       const absDiff = Math.abs(diff);
       
       let type: 'PERFECT' | 'GOOD' = 'GOOD';
-      let baseScore = SCORE_BASE_GOOD;
       const windowPerfect = BASE_HIT_WINDOW_PERFECT * hitWindowMultiplierRef.current;
 
       if (absDiff < windowPerfect) {
         type = 'PERFECT';
-        baseScore = SCORE_BASE_PERFECT;
         scoreRef.current.perfect++;
       } else {
         scoreRef.current.good++;
       }
+
+      const totalNotes = notes.length || 1;
+      const accScorePerNote = (MAX_SCORE * ACC_WEIGHT) / totalNotes;
+      const hitValue = type === 'PERFECT' ? 1.0 : 0.6;
+      const gainedAccScore = accScorePerNote * hitValue;
+      const comboScorePerNote = (MAX_SCORE * COMBO_WEIGHT) / totalNotes;
+
+      // FIX: Use Math.min to prevent float overflow > 1,000,000
+      const newScore = scoreRef.current.score + gainedAccScore + comboScorePerNote;
+      scoreRef.current.score = Math.min(MAX_SCORE, newScore);
 
       scoreRef.current.hitHistory.push(diff);
       triggerHitVisuals(lane, type);
@@ -153,10 +149,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       
       scoreRef.current.combo++;
       if (scoreRef.current.combo > scoreRef.current.maxCombo) scoreRef.current.maxCombo = scoreRef.current.combo;
-      
-      const modMult = getScoreMultiplier();
-      const comboBonus = 1 + Math.min(scoreRef.current.combo, 100) / 50;
-      scoreRef.current.score += baseScore * comboBonus * modMult;
       
       onScoreUpdate({...scoreRef.current});
     }
@@ -281,7 +273,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       playHitSound(type);
       laneHitStateRef.current[lane] = 1.0; 
       comboScaleRef.current = 1.4;
-      const { dpr, height } = sizeRef.current;
+      const { height } = sizeRef.current;
       const laneX = (startXRef.current + lane * laneWidthRef.current + laneWidthRef.current / 2);
       const hitY = height * (isMobileRef.current ? 0.85 : 0.80);
       const hitColor = isPerfect ? theme.perfectColor : theme.goodColor;
@@ -322,18 +314,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     const hitLineRatio = isMobileRef.current ? 0.85 : 0.80;
     const hitLineY = height * hitLineRatio;
 
-    // Logic updates
+    // Backgrounds
     let targetIntensity = 0;
     if (structure?.sections) {
         const currentSection = structure.sections.find(s => gameTime >= s.startTime && gameTime < s.endTime);
         if (currentSection) {
             targetIntensity = currentSection.intensity;
-            if (currentSection.type === 'chorus' || currentSection.type === 'drop') targetIntensity = Math.max(targetIntensity, 0.85);
+            if (currentSection.type === 'chorus' || currentSection.type === 'drop') targetIntensity = Math.max(targetIntensity, 1.2); 
         }
     }
     if (!isFrozen) smoothedIntensityRef.current += (targetIntensity - smoothedIntensityRef.current) * 0.05;
     const visualIntensity = smoothedIntensityRef.current;
-    const isKiai = visualIntensity > 0.75;
+    const isKiai = visualIntensity > 0.8;
     let beatPulse = 0;
     if (!isFrozen) {
         const bpm = structure?.bpm || 120;
@@ -341,16 +333,33 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         beatPulse = Math.pow(1 - (gameTime % beatDur) / beatDur, 2); 
     }
 
-    // 1. Background (Solid)
-    ctx.fillStyle = '#050505'; 
+    // --- ENHANCED BACKGROUND RENDER ---
+    // 1. Base Gradient (Lighter than pure black)
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, height);
+    bgGrad.addColorStop(0, '#13131f'); // Dark blue-grey at top
+    bgGrad.addColorStop(1, '#050508'); // Darker at bottom
+    ctx.fillStyle = bgGrad;
     ctx.fillRect(0, 0, width, height);
+
+    // 2. Always-on Ambient Light (Theme Color)
+    // Ensures the chart is never "pitch black" even in low intensity
+    ctx.globalAlpha = 0.08;
+    const baseAmbient = ctx.createRadialGradient(width/2, height/2, width*0.1, width/2, height/2, width*0.8);
+    baseAmbient.addColorStop(0, theme.secondaryColor);
+    baseAmbient.addColorStop(1, 'transparent');
+    ctx.fillStyle = baseAmbient;
+    ctx.fillRect(0, 0, width, height);
+    ctx.globalAlpha = 1.0;
     
-    // 2. Pulse (Glow layer - instead of shadowBlur)
-    if (visualIntensity > 0.1) {
-        const opacity = (visualIntensity * 0.1) + (isKiai ? beatPulse * 0.08 : 0);
-        ctx.globalAlpha = opacity;
+    // 3. Dynamic Kiai / Intensity Bloom
+    const baseOpacity = visualIntensity * 0.2;
+    const kiaiBoost = isKiai ? (beatPulse * 0.3) : 0;
+    const finalOpacity = Math.min(0.6, baseOpacity + kiaiBoost);
+    
+    if (finalOpacity > 0.01) {
+        ctx.globalAlpha = finalOpacity;
         const glowColor = isKiai ? theme.primaryColor : theme.secondaryColor;
-        const radialGrad = ctx.createRadialGradient(width/2, height/2, 0, width/2, height/2, width);
+        const radialGrad = ctx.createRadialGradient(width/2, height/2, 0, width/2, height/2, Math.max(width, height) * 0.8);
         radialGrad.addColorStop(0, glowColor);
         radialGrad.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = radialGrad;
@@ -358,11 +367,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.globalAlpha = 1.0;
     }
     
-    // 3. Track Background
-    ctx.fillStyle = 'rgba(10, 10, 15, 0.6)'; 
+    // Track Background (slightly more visible now that bg is lighter)
+    ctx.fillStyle = 'rgba(15, 20, 25, 0.7)'; 
     ctx.fillRect(startX, 0, count * laneW, height);
 
-    // 4. Dividers (Batched)
     ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
     for (let i = 1; i < count; i++) {
         ctx.fillRect(startX + i * laneW - 0.5, 0, 1, height);
@@ -371,15 +379,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     ctx.fillRect(startX - 1, 0, 1, height);
     ctx.fillRect(startX + count * laneW, 0, 1, height);
 
-    // 5. Hit Zone (Layered Glows)
     const hitBarAlpha = 0.4 + beatPulse * 0.3;
     ctx.fillStyle = `${theme.primaryColor}${Math.floor(hitBarAlpha * 255).toString(16).padStart(2,'0')}`;
     ctx.fillRect(startX, hitLineY - 1, count * laneW, 2);
-    // Extra glow layer
     ctx.fillStyle = `${theme.primaryColor}22`;
     ctx.fillRect(startX, hitLineY - 3, count * laneW, 6);
 
-    // 6. Lane Press Effects
     for (let i = 0; i < count; i++) {
         const x = startX + i * laneW;
         if (laneMissStateRef.current[i] > 0) {
@@ -402,34 +407,53 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         }
     }
 
-    // 7. Notes (Culling & Performance)
     const viewLimitTop = -100;
     const viewLimitBottom = height + 100;
-
-    // Cache some note drawing logic to minimize lookups
+    
+    // Notes Loop
+    // New logic: If hideNotes is true, we ONLY render if note.missed is true (to show failure).
+    // The hit particles are handled separately.
     notesRef.current.forEach(note => {
         if (!note.visible && !note.missed) return;
         
+        // Auto Play
         if (isAutoRef.current && !note.hit && !note.missed && !isFrozen && gameTime >= note.time) {
             note.hit = true;
             if (note.duration > 0) note.isHolding = true; else note.visible = false;
-            scoreRef.current.perfect++; scoreRef.current.combo++;
+            
+            scoreRef.current.perfect++; 
+            scoreRef.current.combo++;
             if (scoreRef.current.combo > scoreRef.current.maxCombo) scoreRef.current.maxCombo = scoreRef.current.combo;
-            scoreRef.current.score += SCORE_BASE_PERFECT * (1 + Math.min(scoreRef.current.combo, 100) / 50) * getScoreMultiplier();
+            
+            // Auto Score (no modifiers applied as per new rule, multiplier is 1.0)
+            const totalNotes = notesRef.current.length || 1;
+            const scorePerPerfect = ((MAX_SCORE * ACC_WEIGHT) / totalNotes) * 1.0 + ((MAX_SCORE * COMBO_WEIGHT) / totalNotes);
+            
+            // FIX: Clamp Score
+            scoreRef.current.score = Math.min(MAX_SCORE, scoreRef.current.score + scorePerPerfect);
+
             triggerHitVisuals(note.lane, 'PERFECT');
             onScoreUpdate({...scoreRef.current});
         }
 
         if (!isFrozen) {
             if (note.hit && !note.missed && !note.isHolding) return;
+            
             if (note.type === 'CATCH' && !note.hit && !note.missed && !isAutoRef.current) {
                  if (Math.abs(gameTime - note.time) <= (BASE_HIT_WINDOW_CATCH * hitWindowMultiplierRef.current) && keyStateRef.current[note.lane]) {
                      note.hit = true; note.visible = false;
                      scoreRef.current.perfect++; scoreRef.current.combo++;
-                     scoreRef.current.score += SCORE_BASE_PERFECT * (1 + Math.min(scoreRef.current.combo, 100) / 50) * getScoreMultiplier();
-                     triggerHitVisuals(note.lane, 'PERFECT'); onScoreUpdate({...scoreRef.current});
+                     const totalNotes = notesRef.current.length || 1;
+                     const scorePerPerfect = ((MAX_SCORE * ACC_WEIGHT) / totalNotes) * 1.0 + ((MAX_SCORE * COMBO_WEIGHT) / totalNotes);
+                     
+                     // FIX: Clamp Score
+                     scoreRef.current.score = Math.min(MAX_SCORE, scoreRef.current.score + scorePerPerfect);
+
+                     triggerHitVisuals(note.lane, 'PERFECT'); 
+                     onScoreUpdate({...scoreRef.current});
                  }
             }
+            
             const windowGood = BASE_HIT_WINDOW_GOOD * hitWindowMultiplierRef.current;
             if (!note.hit && !note.missed && gameTime > note.time + windowGood) {
                 note.missed = true; note.hit = true; scoreRef.current.miss++; scoreRef.current.combo = 0;
@@ -438,18 +462,22 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                 if (isSuddenDeathRef.current && !hasEndedRef.current) { hasEndedRef.current = true; onGameEnd(scoreRef.current); }
                 onScoreUpdate({...scoreRef.current});
             }
+            
             if (note.hit && note.duration > 0 && note.isHolding) {
                 if (gameTime < note.time + note.duration) {
                     if (Math.random() > 0.6) particlesRef.current.push(new Particle((startX + note.lane * laneW + laneW / 2), hitLineY, theme.secondaryColor));
-                    scoreRef.current.score += SCORE_HOLD_TICK * (1 + Math.min(scoreRef.current.combo, 100) / 100) * getScoreMultiplier();
                 } else { note.visible = false; note.isHolding = false; }
                 onScoreUpdate({...scoreRef.current});
             }
         }
         
         const headY = hitLineY - (note.time - gameTime) * speed; 
-        // CULLING: Skip drawing if not in viewport
-        if (headY > viewLimitBottom || (headY + note.duration * speed) < viewLimitTop) return; 
+        const tailY = headY - note.duration * speed;
+        
+        if (headY < viewLimitTop || tailY > viewLimitBottom) return; 
+
+        // CRITICAL FIX: If hideNotes is enabled, simply SKIP the drawing part below unless missed
+        if (hideNotes && !note.missed) return;
 
         const noteX = startX + note.lane * laneW + 4;
         const noteW = laneW - 8;
@@ -463,7 +491,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
         ctx.globalAlpha = note.missed ? 0.4 : opacity;
         
-        // Render Hold Body
         if (note.duration > 0) {
             let drawHeadY = headY;
             let drawHeight = note.duration * speed;
@@ -475,7 +502,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             ctx.fillRect(tailX, drawHeadY - drawHeight - 2, tailW, 4); 
         }
 
-        // Render Head
         if (!note.isHolding || note.duration === 0) {
             if (note.type === 'CATCH') {
                 const cx = noteX + noteW / 2; const cy = headY;
@@ -493,7 +519,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.globalAlpha = 1.0;
     });
 
-    // 8. Flashlight
     if (isFlashlightRef.current) {
         ctx.save();
         ctx.globalCompositeOperation = 'destination-in';
@@ -503,7 +528,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.restore();
     }
 
-    // 9. Particles & Effects
     ghostNotesRef.current = ghostNotesRef.current.filter(g => g.life > 0);
     ghostNotesRef.current.forEach(g => {
         const y = hitLineY - (g.timeDiff * speed);
@@ -534,12 +558,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.restore();
     });
 
-    // 10. UI Bar (Progress)
     const progress = Math.min(1, Math.max(0, gameTime) / (audioBuffer?.duration || 1));
     ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.fillRect(0, 0, width, 4);
     ctx.fillStyle = theme.primaryColor; ctx.fillRect(0, 0, width * progress, 4);
 
-    // 11. Combo (Center)
     if (scoreRef.current.combo > 0) {
         if (!isFrozen) comboScaleRef.current += (1.0 - comboScaleRef.current) * 0.15;
         ctx.save();
@@ -561,9 +583,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     <div ref={containerRef} className="relative w-full h-full flex justify-center overflow-hidden bg-black touch-none select-none"
         style={{ touchAction: 'none' }} onTouchStart={handleGlobalTouch} onTouchMove={handleGlobalTouch} onTouchEnd={handleGlobalTouch} onTouchCancel={handleGlobalTouch}>
       <canvas ref={canvasRef} className="block w-full h-full" />
-      <div className="absolute top-4 right-6 text-right pointer-events-none hidden md:block">
-          <div className="text-3xl font-black text-white tracking-tighter tabular-nums">{Math.floor(scoreRef.current.score).toLocaleString()}</div>
-          <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Score</div>
+      <div className="absolute top-4 right-4 md:right-6 text-right pointer-events-none z-20 mix-blend-screen">
+          {/* FIX: Use Math.round instead of floor to display correct score */}
+          <div className="text-xl md:text-3xl font-black text-white tracking-tighter tabular-nums drop-shadow-md">
+              {Math.round(scoreRef.current.score).toLocaleString()}
+          </div>
+          <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest opacity-80">Score</div>
       </div>
     </div>
   );

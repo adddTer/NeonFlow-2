@@ -48,14 +48,20 @@ export const analyzeStructureWithGemini = async (
   // 默认结构（保底）
   const defaultStructure: SongStructure = {
       bpm: 120,
-      sections: [{ startTime: 0, endTime: 600, type: 'verse', intensity: 0.8, style: 'stream' }]
+      sections: [{ 
+          startTime: 0, 
+          endTime: 600, 
+          type: 'verse', 
+          intensity: 0.8, 
+          style: 'stream',
+          descriptors: { flow: 'linear', hand_bias: 'balanced', focus: 'melody' }
+      }]
   };
   
   // 默认主题
   let finalTheme = { ...DEFAULT_THEME };
   const finalMetadata = { title: undefined as string | undefined, artist: undefined as string | undefined, album: undefined as string | undefined };
 
-  // If nothing is requested or no key, return defaults
   if ((!options.structure && !options.theme && !options.metadata) || !apiKey) {
     if (!apiKey) console.warn("No API Key provided, using DSP fallback.");
     return { structure: defaultStructure, theme: finalTheme, metadata: finalMetadata };
@@ -64,45 +70,42 @@ export const analyzeStructureWithGemini = async (
   const ai = new GoogleGenAI({ apiKey });
 
   try {
-    // Dynamic Prompt Construction
-    let systemInstruction = `You are an expert Rhythm Game Chart Designer and Music Metadata Specialist.`;
+    // Direction 1: Role Upgrade - Choreographer
+    let systemInstruction = `You are an expert Rhythm Game Choreographer (Chart Designer). You analyze audio not just for structure, but for the *physical sensation* of playing it.`;
     let taskInstruction = "";
     
     if (options.structure) {
         taskInstruction += `
-        Task 1: Music Analysis
-        - Identify EXACT BPM.
-        - Segment song into gameplay sections.
-        - Assign intensity (0.0-1.0) and style.`;
+        Task 1: Choreography Analysis
+        - Identify BPM.
+        - Segment song.
+        - **MANDATORY**: For each section, provide "Motion Descriptors":
+          - flow: "linear" (scales/stairs), "zigzag" (trills/jumps), "circular" (rolls), "random".
+          - hand_bias: "alternating" (L-R-L-R), "left_heavy", "right_heavy", "balanced".
+          - focus: "vocal" (lyrical, sustained), "drum" (rhythmic, impact), "melody", "bass".
+          - intensity: 0.0-1.0.
+        `;
     }
     
     if (options.theme) {
         taskInstruction += `
         Task 2: Visual Theme
-        - Analyze the "Vibe" of the song.
-        - Generate a color palette with 3 DISTINCT, HARMONIOUS colors for gameplay notes:
-          1. primaryColor: For NORMAL notes (e.g., Cyan, Blue).
-          2. secondaryColor: For HOLD notes (e.g., Purple, Pink).
-          3. catchColor: For CATCH/SLIDER notes (Must be high contrast, e.g., Yellow, Gold, Bright Green).
-        - Ensure these 3 colors are easily distinguishable from each other against a dark background.`;
+        - Analyze the "Vibe".
+        - Generate palette: primaryColor, secondaryColor, catchColor.
+        `;
     }
 
     if (options.metadata) {
         taskInstruction += `
-        Task 3: Metadata Identification (STRICT RULES)
-        - Filename hint: "${filename}"
-        - Use Google Search to verify the song title and artist if unsure.
-        - **RULE 1 (NO BRACKETS):** Remove ALL brackets like (), [], {}, 【】. NO "feat.", "ft.", "Official", "MV".
-        - **RULE 2 (FORMAT):** If song has titles in multiple languages, format as: "[Main Language Title] [Sub Language Title]". 
-        - **RULE 3 (PRIORITY):** Main Language Priority: Chinese > English > Japanese/Korean/Others. 
-        - **RULE 4:** Do NOT translate titles yourself. Only use official dual titles found online.
-        - **RULE 5:** If you cannot identify the song, clean up the filename and use it.
-        - **CRITICAL RULE 6 (DO NOT TRUNCATE STYLIZED NAMES):** If the title contains stylized separators like "==" or "||" (e.g., "Name == Alias"), PRESERVE the full string. Do NOT truncate or split it. Example: "隐德来希 NAME == Entelechy" should remain "隐德来希 NAME == Entelechy", DO NOT shorten it to "隐德来希 Entelechy".`;
+        Task 3: Metadata
+        - Filename: "${filename}"
+        - Remove brackets, ft., official.
+        - Prioritize original language title.
+        `;
     }
 
-    taskInstruction += `\nReturn strictly JSON. Only include fields for requested tasks.`;
+    taskInstruction += `\nReturn strictly JSON.`;
 
-    // Dynamic Schema Construction
     const properties: any = {};
     const requiredProps: string[] = [];
 
@@ -117,9 +120,19 @@ export const analyzeStructureWithGemini = async (
                 endTime: { type: Type.NUMBER },
                 type: { type: Type.STRING },
                 intensity: { type: Type.NUMBER },
-                style: { type: Type.STRING, enum: ['stream', 'jump', 'hold', 'simple'] }
+                style: { type: Type.STRING, enum: ['stream', 'jump', 'hold', 'simple'] },
+                // NEW: Motion Descriptors
+                descriptors: {
+                    type: Type.OBJECT,
+                    properties: {
+                        flow: { type: Type.STRING, enum: ['linear', 'zigzag', 'circular', 'random'] },
+                        hand_bias: { type: Type.STRING, enum: ['alternating', 'left_heavy', 'right_heavy', 'balanced'] },
+                        focus: { type: Type.STRING, enum: ['vocal', 'drum', 'melody', 'bass'] }
+                    },
+                    required: ['flow', 'hand_bias', 'focus']
+                }
             },
-            required: ['startTime', 'endTime', 'type', 'intensity', 'style']
+            required: ['startTime', 'endTime', 'type', 'intensity', 'style', 'descriptors']
           }
         };
         requiredProps.push("bpm", "sections");
@@ -150,26 +163,18 @@ export const analyzeStructureWithGemini = async (
                 identifiedAlbum: { type: Type.STRING }
             }
         };
-        // Metadata is often optional if not found, but we want the object structure
     }
 
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: {
         parts: [
-          {
-            inlineData: {
-              mimeType: mimeType,
-              data: audioBase64
-            }
-          },
-          {
-            text: systemInstruction + taskInstruction
-          }
+          { inlineData: { mimeType: mimeType, data: audioBase64 } },
+          { text: systemInstruction + taskInstruction }
         ]
       },
       config: {
-        tools: options.metadata ? [{ googleSearch: {} }] : [], // Only enable search if metadata requested
+        tools: options.metadata ? [{ googleSearch: {} }] : [],
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -181,18 +186,22 @@ export const analyzeStructureWithGemini = async (
 
     if (response.text) {
       const data = JSON.parse(response.text) as AIAnalysisResult;
-      console.log("Gemini Analysis Complete:", data);
       
       let structureResult = defaultStructure;
       if (options.structure && data.bpm && data.sections) {
-          structureResult = { bpm: data.bpm, sections: data.sections };
+          // Normalize descriptors if missing
+          const normalizedSections = data.sections.map((s: any) => ({
+              ...s,
+              descriptors: s.descriptors || { flow: 'random', hand_bias: 'balanced', focus: 'melody' }
+          }));
+          structureResult = { bpm: data.bpm, sections: normalizedSections };
       }
       
       if (options.theme && data.theme) {
           finalTheme = {
               primaryColor: data.theme.primaryColor,
               secondaryColor: data.theme.secondaryColor,
-              catchColor: data.theme.catchColor || DEFAULT_THEME.catchColor, // Fallback if old model didn't return
+              catchColor: data.theme.catchColor || DEFAULT_THEME.catchColor,
               perfectColor: data.theme.perfectColor || data.theme.primaryColor,
               goodColor: data.theme.goodColor || '#ffffff',
               moodDescription: data.theme.mood
@@ -209,6 +218,7 @@ export const analyzeStructureWithGemini = async (
     }
   } catch (error) {
     console.error("Gemini Analysis Failed:", error);
+    throw error;
   }
   
   return { structure: defaultStructure, theme: finalTheme, metadata: finalMetadata };

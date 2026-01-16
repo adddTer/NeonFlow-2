@@ -1,7 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { getAllSongs, parseSongImport, saveSong } from '../services/storageService';
-import { installDemoAlbum } from '../services/demoService';
 import { SavedSong } from '../types';
 
 export const useSongLibrary = () => {
@@ -45,23 +44,10 @@ export const useSongLibrary = () => {
         await loadLibrary();
     };
 
-    const handleInstallDemo = async (setStatus: (s: any) => void, setLoading: (stage: string, sub: string) => void) => {
-        setStatus('ANALYZING'); // Reuse analyzing status for loading screen
-        try {
-            await installDemoAlbum((stage, sub) => setLoading(stage, sub));
-            await loadLibrary();
-        } catch (e) {
-            alert("安装演示专辑失败，请检查网络或控制台日志。");
-        } finally {
-            setStatus('LIBRARY');
-        }
-    };
-
     return {
         librarySongs,
         isLibraryLoading,
         loadLibrary,
-        handleImportMap,
-        handleInstallDemo
+        handleImportMap
     };
 };

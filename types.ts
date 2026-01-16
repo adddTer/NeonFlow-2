@@ -54,6 +54,13 @@ export interface Onset {
   isLowFreq: boolean; // 是否是低频打击 (Kick/Bass)
 }
 
+// 方向一：动态描述符
+export interface MotionDescriptors {
+    flow: 'linear' | 'zigzag' | 'circular' | 'random';
+    hand_bias: 'alternating' | 'left_heavy' | 'right_heavy' | 'balanced';
+    focus: 'vocal' | 'drum' | 'melody' | 'bass';
+}
+
 // Gemini 决策层输出：歌曲结构元数据
 export interface SongStructure {
   bpm: number;
@@ -65,7 +72,9 @@ export interface SectionInfo {
   endTime: number;
   type: 'intro' | 'verse' | 'chorus' | 'build' | 'drop' | 'outro';
   intensity: number; // 0.0 - 1.0 (密度倍率)
-  style: 'stream' | 'jump' | 'hold' | 'simple'; // 风格偏好
+  // style 保留用于兼容，新增 descriptors
+  style: 'stream' | 'jump' | 'hold' | 'simple'; 
+  descriptors: MotionDescriptors; 
 }
 
 export interface GameResult {

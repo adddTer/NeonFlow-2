@@ -78,7 +78,8 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
 
   if (status !== GameStatus.Finished) return null;
 
-  const { rank, color, label } = calculateGrade(score.perfect, score.good, score.miss, notesCount);
+  // Use the new calculateGrade which only needs score (0-1000000)
+  const { rank, color, label, shadow } = calculateGrade(score.score);
   const accuracy = calculateAccuracy(score.perfect, score.good, notesCount);
   const maxBucketVal = Math.max(...histogram, 1);
 
@@ -106,7 +107,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                  {/* Rank Shadow Glow */}
                  <div className={`absolute inset-0 blur-3xl opacity-30 ${color.includes('red') ? 'bg-red-500' : 'bg-neon-blue'}`}></div>
                  
-                 <div className={`text-[10rem] md:text-[14rem] font-black italic leading-none select-none drop-shadow-2xl ${color}`} style={{ textShadow: '0 0 40px currentColor' }}>
+                 <div className={`text-[10rem] md:text-[14rem] font-black italic leading-none select-none drop-shadow-2xl ${color} ${shadow || ''}`} style={{ textShadow: '0 0 40px currentColor' }}>
                      {rank}
                  </div>
                  <div className="absolute top-full left-0 w-full text-center text-xl md:text-2xl font-black tracking-[0.5em] text-white opacity-80 uppercase mt-[-10px] md:mt-[-20px]">
@@ -123,8 +124,9 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 <div className="grid grid-cols-2 gap-8 mb-6 relative z-10 border-b border-white/5 pb-6">
                     <div>
                         <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1 font-bold">Total Score</div>
+                        {/* FIX: Use Math.round for display */}
                         <div className="text-3xl md:text-4xl font-mono font-black text-white tracking-tighter">
-                            {Math.floor(score.score).toLocaleString()}
+                            {Math.round(score.score).toLocaleString()}
                         </div>
                     </div>
                     <div className="text-right">
@@ -169,7 +171,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                         <div className="text-[10px] text-gray-300 uppercase tracking-widest font-bold flex items-center gap-2">
                              <BarChart2 className="w-3 h-3 text-neon-blue"/> Hit Error
                         </div>
-                        <div className="text-[10px] font-mono text-gray-400">
+                        <div className="text-xs font-mono text-gray-400">
                              {meanOffset > 0 ? '+' : ''}{meanOffset.toFixed(1)}ms / UR {unstableRate.toFixed(1)}
                         </div>
                     </div>

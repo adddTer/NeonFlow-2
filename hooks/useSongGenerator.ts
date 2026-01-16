@@ -21,15 +21,16 @@ export const useSongGenerator = (
     apiKey: string, 
     isDebugMode: boolean, 
     apiKeyStatus: string,
-    onSuccess: () => void
+    onSuccess: () => void,
+    onError?: (errorType: string) => void
 ) => {
     const [pendingFile, setPendingFile] = useState<File | null>(null);
     const [isConfiguringSong, setIsConfiguringSong] = useState(false);
     const [loadingStage, setLoadingStage] = useState<string>(""); 
     const [loadingSubText, setLoadingSubText] = useState<string>("");
+    const [loadingProgress, setLoadingProgress] = useState<number>(0); // NEW: Numeric Progress
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     
-    // Configuration State
     const [selectedLaneCount, setSelectedLaneCount] = useState<LaneCount>(4);
     const [selectedPlayStyle, setSelectedPlayStyle] = useState<PlayStyle>('THUMB');
     const [selectedDifficulty, setSelectedDifficulty] = useState<BeatmapDifficulty | null>(null);
@@ -48,7 +49,6 @@ export const useSongGenerator = (
 
     const handleCreateBeatmap = async (options?: { empty?: boolean }) => {
         if (!pendingFile) return;
-        // In empty mode, difficulty is optional (defaulting to Normal for ID purposes if null)
         const isEmptyMode = options?.empty === true;
         if (!isEmptyMode && !selectedDifficulty) return;
         
@@ -56,47 +56,62 @@ export const useSongGenerator = (
         const file = pendingFile;
         setPendingFile(null);
         setErrorMessage(null);
+        setLoadingProgress(0);
 
         try {
-            setLoadingStage("正在解析音频");
-            setLoadingSubText("分析频率与节奏特征...");
+            setLoadingStage("正在读取音频");
+            setLoadingSubText("解析文件数据...");
+            setLoadingProgress(5);
             
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise(resolve => setTimeout(resolve, 50));
 
             const arrayBuffer = await file.arrayBuffer();
             const audioCtxBuffer = arrayBuffer.slice(0); 
             const saveBuffer = arrayBuffer.slice(0); 
             const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ latencyHint: 'interactive' });
+            
+            setLoadingSubText("解码音频流...");
+            setLoadingProgress(15);
             const decodedBuffer = await audioContext.decodeAudioData(audioCtxBuffer);
+            
+            setLoadingStage("音频特征提取");
+            setLoadingSubText("分离低频与动态范围分析...");
+            setLoadingProgress(30);
             const { lowData, fullData } = await preprocessAudioData(decodedBuffer);
+            
+            setLoadingSubText("提取元数据与封面...");
             const coverArt = await extractCoverArt(file);
+            setLoadingProgress(40);
 
             let structure;
             let aiTheme = DEFAULT_THEME;
             let aiMetadata: { title?: string, artist?: string, album?: string } | undefined;
 
             const isDebugAndNoKey = isDebugMode && apiKeyStatus !== 'valid';
-            const shouldUseFallback = (skipAI) || isDebugAndNoKey; // Logic handles both manual skip and debug skip
+            const shouldUseFallback = (skipAI) || isDebugAndNoKey; 
 
             if (shouldUseFallback) {
-                setLoadingStage(isEmptyMode ? "创建空白谱面" : (isDebugAndNoKey ? "无 API Key：使用默认结构" : "跳过 AI 分析"));
-                setLoadingSubText("使用默认配置...");
-                await new Promise(resolve => setTimeout(resolve, 500));
+                setLoadingStage(isEmptyMode ? "创建工程" : "基础分析");
+                setLoadingSubText("应用默认结构配置...");
+                setLoadingProgress(60);
+                await new Promise(resolve => setTimeout(resolve, 300));
+                
                 structure = { bpm: 120, sections: [{ startTime: 0, endTime: decodedBuffer.duration, type: 'verse', intensity: 0.8, style: 'stream' }] };
                 aiMetadata = { title: file.name.replace(/\.[^/.]+$/, ""), artist: "Unknown Artist" };
             } else {
-                setLoadingStage("Gemini AI 分析中");
-                setLoadingSubText("识别 BPM、结构与视觉主题...");
+                setLoadingStage("云端智能分析");
+                setLoadingSubText("识别音乐结构、BPM与情感色彩...");
+                setLoadingProgress(50);
                 
-                await new Promise(resolve => setTimeout(resolve, 50));
-
-                if (apiKeyStatus === 'valid') {
+                if (apiKeyStatus === 'valid' && apiKey) {
                     const base64String = await fileUtils_fileToBase64(file);
                     const base64Data = base64String.split(',')[1];
+                    // Async call, progress jumps after completion
                     const aiResult = await analyzeStructureWithGemini(file.name, base64Data, file.type, apiKey, aiOptions);
                     structure = aiResult.structure;
                     aiTheme = aiResult.theme;
                     aiMetadata = aiResult.metadata;
+                    setLoadingProgress(75);
                 } else {
                     throw new Error("API Key Missing");
                 }
@@ -107,11 +122,14 @@ export const useSongGenerator = (
 
             if (!isEmptyMode) {
                 setLoadingStage("谱面生成中");
-                setLoadingSubText(`正在构建 ${selectedLaneCount}K 模式键位...`);
-                await new Promise(resolve => setTimeout(resolve, 100));
+                setLoadingSubText(`基于 ${selectedDifficulty} 难度构建 ${selectedLaneCount}K 键位...`);
+                setLoadingProgress(80);
+                await new Promise(resolve => setTimeout(resolve, 50));
 
                 const onsets = computeOnsets(lowData, fullData, decodedBuffer.sampleRate);
                 
+                setLoadingSubText("优化手感与连贯性...");
+                setLoadingProgress(90);
                 finalNotes = generateBeatmap(
                     onsets,
                     structure,
@@ -128,12 +146,13 @@ export const useSongGenerator = (
             } else {
                  setLoadingStage("初始化编辑器");
                  setLoadingSubText("准备空白轨道...");
+                 setLoadingProgress(90);
                  await new Promise(resolve => setTimeout(resolve, 100));
             }
 
             setLoadingStage("保存数据");
             setLoadingSubText("写入本地数据库...");
-            await new Promise(resolve => setTimeout(resolve, 50));
+            setLoadingProgress(95);
             
             const newSong: SavedSong = {
                 id: crypto.randomUUID(),
@@ -152,26 +171,34 @@ export const useSongGenerator = (
             };
 
             await saveSong(newSong);
+            setLoadingProgress(100);
+            
+            // Short delay to show 100%
+            await new Promise(resolve => setTimeout(resolve, 200));
             onSuccess(); 
             
             setLoadingStage("");
             setLoadingSubText("");
+            setLoadingProgress(0);
             return { success: true, songTitle: newSong.title };
 
         } catch (error: any) {
             console.error("Error importing song:", error);
             setLoadingStage("");
             setLoadingSubText("");
+            setLoadingProgress(0);
             
             if (error.message && error.message.includes("GenerativeFailure")) {
                 setErrorMessage("生成失败：无法提取有效节奏。");
-            } else if (error.message === "API Key Missing") {
-                setErrorMessage("生成失败：缺少 API Key。");
+                return { success: false, error: 'GEN_FAIL' };
+            } else if (error.message === "API Key Missing" || error.message.includes("403") || error.message.includes("401")) {
+                setErrorMessage("生成失败：API Key 无效或未配置。");
+                if (onError) onError('API_KEY_MISSING');
                 return { success: false, error: 'API_KEY_MISSING' };
             } else {
                 setErrorMessage("导入出错，请检查文件格式。" + error.message);
+                return { success: false, error: 'UNKNOWN' };
             }
-            return { success: false, error: 'UNKNOWN' };
         }
     };
 
@@ -180,6 +207,7 @@ export const useSongGenerator = (
         isConfiguringSong, setIsConfiguringSong,
         loadingStage, setLoadingStage,
         loadingSubText, setLoadingSubText,
+        loadingProgress, setLoadingProgress, // Exported
         errorMessage, setErrorMessage,
         onFileSelect,
         handleCreateBeatmap,

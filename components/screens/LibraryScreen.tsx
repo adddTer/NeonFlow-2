@@ -1,11 +1,10 @@
 
 import React, { useState, useRef, useMemo, useEffect } from 'react';
-import { Upload, Play, Trash2, Edit2, Download, CheckSquare, Square, Music, Clock, Zap, Plus, FileJson, Trophy, Layers, Lock, Disc, Info, X, Calendar, Activity, Loader2, AlertTriangle, PlayCircle, MoreHorizontal, Heart, ArrowUpDown, Search, SortAsc, ChevronDown, Filter, Edit3, Type, Album, CloudDownload } from 'lucide-react';
-import { SavedSong, GameStatus } from '../../types';
+import { Upload, Trash2, Download, CheckSquare, Music, Clock, Zap, Plus, Trophy, Disc, Info, X, Calendar, Loader2, AlertTriangle, Heart, SortAsc, ChevronDown, Type, Search } from 'lucide-react';
+import { SavedSong } from '../../types';
 import { deleteSong, updateSongMetadata, exportSongAsZip, toggleFavorite } from '../../services/storageService';
 import { calculateAccuracy, calculateRating } from '../../utils/scoring';
 import { SongDetailsModal } from '../library/SongDetailsModal';
-import { useSongLibrary } from '../../hooks/useSongLibrary'; 
 
 const formatTime = (seconds: number) => {
   const m = Math.floor(seconds / 60);
@@ -36,11 +35,7 @@ const SORT_LABELS: Record<SortOption, { label: string, icon: React.ReactNode }> 
     'TITLE_ASC': { label: '歌名 (A-Z)', icon: <SortAsc className="w-3.5 h-3.5" /> },
 };
 
-interface LibraryScreenPropsWithDemo extends LibraryScreenProps {
-    onInstallDemo?: () => void;
-}
-
-export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
+export const LibraryScreen: React.FC<LibraryScreenProps> = ({
   songs,
   onImportAudioClick,
   onImportMapClick,
@@ -48,41 +43,28 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
   onEditSong,
   onRefreshLibrary,
   isLoading,
-  hasApiKey,
-  onOpenSettings,
-  onOpenProfile,
-  onInstallDemo
+  onOpenProfile
 }) => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ title: '', artist: '' });
   
-  // Sort & Filter
   const [sortOption, setSortOption] = useState<SortOption>('DATE_NEW');
   const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
   const [filterFavorites, setFilterFavorites] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Details Modal State
   const [showDetailsId, setShowDetailsId] = useState<string | null>(null);
-  
-  // Export Modal State
   const [showExportModal, setShowExportModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [includeHistory, setIncludeHistory] = useState(true);
-
-  // Delete Confirm Modal State
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-
-  // Demo Confirm Modal State
-  const [showDemoConfirm, setShowDemoConfirm] = useState(false);
 
   const audioInputRef = useRef<HTMLInputElement>(null);
   const mapInputRef = useRef<HTMLInputElement>(null);
   const sortRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown on click outside
   useEffect(() => {
       const handleClickOutside = (event: MouseEvent) => {
           if (sortRef.current && !sortRef.current.contains(event.target as Node)) {
@@ -93,12 +75,8 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
       return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // --- Derived State ---
-  
   const processedSongs = useMemo(() => {
       let result = [...songs];
-      
-      // Filter
       if (filterFavorites) {
           result = result.filter(s => s.isFavorite);
       }
@@ -106,8 +84,6 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
           const q = searchQuery.toLowerCase();
           result = result.filter(s => s.title.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q));
       }
-
-      // Sort
       result.sort((a, b) => {
           switch (sortOption) {
               case 'DATE_NEW': return b.createdAt - a.createdAt;
@@ -115,11 +91,8 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
               case 'DIFFICULTY_DESC': return b.difficultyRating - a.difficultyRating;
               case 'DIFFICULTY_ASC': return a.difficultyRating - b.difficultyRating;
               case 'RATING_DESC': 
-                  const accA = a.bestResult ? (a.bestResult.perfect + a.bestResult.good) / (a.notes.length || 1) : 0;
-                  const valA = calculateRating(a.difficultyRating, accA);
-                  
-                  const accB = b.bestResult ? (b.bestResult.perfect + b.bestResult.good) / (b.notes.length || 1) : 0;
-                  const valB = calculateRating(b.difficultyRating, accB);
+                  const valA = a.bestResult ? calculateRating(a.difficultyRating, a.bestResult.score) : 0;
+                  const valB = b.bestResult ? calculateRating(b.difficultyRating, b.bestResult.score) : 0;
                   return valB - valA;
               default: return 0;
           }
@@ -128,23 +101,20 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
   }, [songs, sortOption, filterFavorites, searchQuery]);
 
   const playerRating = useMemo(() => {
-      // Calculate Player Potential (Average of Top 10 Best Rated Plays)
       const ratings = songs
           .map(s => {
               if (!s.bestResult) return 0;
-              const acc = (s.bestResult.perfect + s.bestResult.good) / (s.notes.length || 1);
-              return calculateRating(s.difficultyRating, acc);
+              return calculateRating(s.difficultyRating, s.bestResult.score);
           })
           .sort((a, b) => b - a)
           .slice(0, 10);
       
       if (ratings.length === 0) return 0;
       const sum = ratings.reduce((a, b) => a + b, 0);
-      return sum / Math.min(ratings.length, 10); // Average of what we have (up to 10)
+      return sum / Math.min(ratings.length, 10);
   }, [songs]);
 
   const getLevelDisplay = (rating: number) => {
-      // Omega Level (20+)
       if (rating >= 20.0) {
           return { val: 'Ω', color: '#ff0044', isTitan: true, isOmega: true }; 
       }
@@ -166,7 +136,6 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
           if (rating < r.max) return { val: r.level, color: r.color };
       }
 
-      // Titan Levels (11-19)
       const val = Math.floor(rating);
       const color = val >= 14 ? '#bd00ff' : '#d946ef'; 
       return { val, color, isTitan: true };
@@ -175,49 +144,34 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
   const toggleSelection = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const newSet = new Set(selectedIds);
-    if (newSet.has(id)) {
-      newSet.delete(id);
-    } else {
-      newSet.add(id);
-    }
+    if (newSet.has(id)) newSet.delete(id);
+    else newSet.add(id);
     setSelectedIds(newSet);
   };
 
   const selectAll = () => {
-    if (selectedIds.size === processedSongs.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(processedSongs.map(s => s.id)));
-    }
+    if (selectedIds.size === processedSongs.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(processedSongs.map(s => s.id)));
   };
 
   const confirmDelete = async () => {
     setShowDeleteConfirm(false);
-    for (const id of selectedIds) {
-        await deleteSong(id);
-    }
+    for (const id of selectedIds) await deleteSong(id);
     setSelectedIds(new Set());
     setIsSelectionMode(false);
     onRefreshLibrary();
-  };
-
-  const openExportModal = () => {
-      setShowExportModal(true);
   };
 
   const handleExportConfirm = async () => {
      setIsExporting(true);
      try {
          const songsToExport = songs.filter(s => selectedIds.has(s.id));
-         for (const song of songsToExport) {
-             await exportSongAsZip(song, includeHistory);
-         }
+         for (const song of songsToExport) await exportSongAsZip(song, includeHistory);
          setShowExportModal(false);
          setSelectedIds(new Set());
          setIsSelectionMode(false);
      } catch (e) {
          console.error(e);
-         console.error("Export failed");
      } finally {
          setIsExporting(false);
      }
@@ -243,10 +197,6 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
     }
   };
 
-  const handleCreateClick = () => {
-      audioInputRef.current?.click();
-  };
-  
   const detailSong = songs.find(s => s.id === showDetailsId);
 
   return (
@@ -255,15 +205,9 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
       {/* Top Toolbar */}
       <div className="shrink-0 p-4 md:p-6 z-20 flex flex-col gap-4 bg-gradient-to-b from-[#030304] via-[#030304] to-transparent pointer-events-none">
          
-         {/* Row 1: Title & Player Stats */}
          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pointer-events-auto w-full">
              <div className="flex items-center gap-4">
-                 <div className="flex items-center gap-3">
-                    <Music className="w-5 h-5 text-neon-blue" />
-                    <h2 className="text-xl font-black text-white tracking-widest uppercase">曲库</h2>
-                 </div>
-                 
-                 {/* Player Rating Badge */}
+                 {/* Rating Badge */}
                  <button 
                     onClick={onOpenProfile}
                     className="px-3 py-1 bg-white/5 border border-white/10 rounded-full flex items-center gap-2 hover:bg-white/20 hover:border-neon-purple/50 transition-all cursor-pointer group shadow-lg" 
@@ -276,7 +220,6 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
              </div>
 
              <div className="flex items-center gap-2 w-full md:w-auto">
-                 {/* Search Bar */}
                  <div className="relative flex-1 md:w-48 group">
                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-white transition-colors" />
                      <input 
@@ -288,9 +231,8 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
                      />
                  </div>
                  
-                 {/* Create Button */}
                  <button 
-                    onClick={handleCreateClick}
+                    onClick={() => audioInputRef.current?.click()}
                     className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold uppercase tracking-wider text-xs transition-all shadow-lg bg-white text-black hover:bg-neon-blue hover:shadow-neon-blue/20 shrink-0`}
                  >
                      {isLoading ? <Loader2 className="w-4 h-4 animate-spin"/> : <Plus className="w-4 h-4" />}
@@ -300,13 +242,8 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
              </div>
          </div>
 
-         {/* Row 2: Controls & Filters */}
          <div className="flex flex-wrap items-center justify-between gap-3 pointer-events-auto w-full">
-             
-             {/* Filter & Sort Group */}
              <div className="flex items-center gap-2">
-                 
-                 {/* Custom Sort Dropdown */}
                  <div className="relative" ref={sortRef}>
                      <button 
                         onClick={() => setIsSortDropdownOpen(!isSortDropdownOpen)}
@@ -318,22 +255,15 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
                          </div>
                          <ChevronDown className={`w-3 h-3 transition-transform ${isSortDropdownOpen ? 'rotate-180' : ''}`} />
                      </button>
-                     
                      {isSortDropdownOpen && (
                          <div className="absolute top-full left-0 mt-2 w-48 bg-[#0f172a] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 animate-fade-in">
                              {Object.entries(SORT_LABELS).map(([key, config]) => (
                                  <button
                                      key={key}
-                                     onClick={() => {
-                                         setSortOption(key as SortOption);
-                                         setIsSortDropdownOpen(false);
-                                     }}
-                                     className={`w-full flex items-center gap-3 px-4 py-3 text-xs font-bold transition-colors text-left
-                                         ${sortOption === key ? 'bg-neon-blue/10 text-neon-blue' : 'text-gray-400 hover:bg-white/5 hover:text-white'}
-                                     `}
+                                     onClick={() => { setSortOption(key as SortOption); setIsSortDropdownOpen(false); }}
+                                     className={`w-full flex items-center gap-3 px-4 py-3 text-xs font-bold transition-colors text-left ${sortOption === key ? 'bg-neon-blue/10 text-neon-blue' : 'text-gray-400 hover:bg-white/5 hover:text-white'}`}
                                  >
-                                     {config.icon}
-                                     {config.label}
+                                     {config.icon} {config.label}
                                      {sortOption === key && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-neon-blue"></div>}
                                  </button>
                              ))}
@@ -341,7 +271,6 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
                      )}
                  </div>
 
-                 {/* Favorites Filter */}
                  <button 
                     onClick={() => setFilterFavorites(!filterFavorites)}
                     className={`p-2 rounded-xl border transition-all flex items-center gap-2 ${filterFavorites ? 'bg-neon-pink/20 border-neon-pink text-neon-pink' : 'bg-white/5 border-white/5 text-gray-400 hover:text-white hover:bg-white/10'}`}
@@ -352,7 +281,6 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
                  </button>
              </div>
 
-             {/* Selection Tools */}
              <div className="flex items-center gap-2">
                  {isSelectionMode ? (
                      <div className="flex items-center bg-black/60 backdrop-blur-md rounded-xl p-1 border border-white/10 animate-fade-in">
@@ -363,7 +291,7 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
                         <button onClick={() => setShowDeleteConfirm(true)} disabled={selectedIds.size === 0} className="px-3 py-1.5 text-xs font-bold text-red-400 hover:text-red-300 rounded-lg hover:bg-red-500/10 transition disabled:opacity-30">
                             删除 ({selectedIds.size})
                         </button>
-                        <button onClick={openExportModal} disabled={selectedIds.size === 0} className="px-3 py-1.5 text-xs font-bold text-neon-blue hover:text-white rounded-lg hover:bg-neon-blue/10 transition disabled:opacity-30">
+                        <button onClick={() => setShowExportModal(true)} disabled={selectedIds.size === 0} className="px-3 py-1.5 text-xs font-bold text-neon-blue hover:text-white rounded-lg hover:bg-neon-blue/10 transition disabled:opacity-30">
                             导出
                         </button>
                         <div className="w-px h-3 bg-white/10 mx-1"></div>
@@ -383,35 +311,8 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
          </div>
       </div>
 
-      {/* Main Grid Content */}
       <div className="flex-1 overflow-y-auto custom-scrollbar px-4 md:px-6 pb-24">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6">
-              
-              {/* Special Demo Album Card - Temporarily Hidden */}
-              {false && onInstallDemo && !filterFavorites && !searchQuery && (
-                  <div 
-                      onClick={() => setShowDemoConfirm(true)}
-                      className="group relative aspect-[4/3] rounded-3xl overflow-hidden border border-indigo-500/30 hover:border-indigo-400 cursor-pointer bg-gradient-to-br from-indigo-900 to-black hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(99,102,241,0.2)] transition-all duration-300"
-                  >
-                      {/* Animated Background */}
-                      <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20"></div>
-                      <div className="absolute -top-20 -right-20 w-64 h-64 bg-indigo-500/20 rounded-full blur-[80px] group-hover:bg-indigo-400/30 transition-colors"></div>
-                      <div className="absolute -bottom-20 -left-20 w-64 h-64 bg-purple-500/20 rounded-full blur-[80px] group-hover:bg-purple-400/30 transition-colors"></div>
-                      
-                      {/* Content */}
-                      <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 z-10">
-                          <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center mb-4 backdrop-blur-md border border-white/20 shadow-lg group-hover:scale-110 transition-transform">
-                              <CloudDownload className="w-8 h-8 text-indigo-300" />
-                          </div>
-                          <h3 className="text-2xl font-black text-white mb-1 drop-shadow-lg">万象回响</h3>
-                          <p className="text-xs text-indigo-200 font-bold uppercase tracking-widest mb-4">官方演示专辑</p>
-                          <div className="px-4 py-1.5 bg-white/10 rounded-full text-[10px] font-bold text-white border border-white/10 group-hover:bg-white/20 transition-colors">
-                              点击加载资源 (15首)
-                          </div>
-                      </div>
-                  </div>
-              )}
-
               {processedSongs.map(song => {
                   const levelInfo = (song as any)._displayLevel || getLevelDisplay(song.difficultyRating);
                   const secondaryColor = song.theme?.secondaryColor || '#222';
@@ -425,7 +326,6 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
                          `}
                          style={{ isolation: 'isolate' }}
                       >
-                         {/* Cover Art Container */}
                          <div className="absolute inset-0 z-0 bg-black">
                              {song.coverArt ? (
                                 <>
@@ -434,11 +334,9 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
                                         alt="cover" 
                                         className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
                                     />
-                                    {/* Gradient Overlay - strictly positioned over image */}
                                     <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent pointer-events-none"></div>
                                 </>
                              ) : (
-                                // Fallback
                                 <div 
                                     className="w-full h-full relative overflow-hidden"
                                     style={{ background: `linear-gradient(135deg, ${secondaryColor}, #000)` }}
@@ -454,11 +352,8 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
                              )}
                          </div>
                          
-                         {/* Content Layer (Higher Z-Index) */}
                          <div className="absolute inset-0 z-10 pointer-events-none p-5 flex flex-col justify-between">
-                             {/* Top Section */}
                              <div className="flex justify-between items-start">
-                                 {/* Level Badge */}
                                  <div className="flex flex-col items-center">
                                      <div 
                                         className="w-12 h-12 rounded-xl flex items-center justify-center backdrop-blur-md border border-white/10 shadow-lg bg-black/40"
@@ -468,10 +363,16 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
                                      </div>
                                  </div>
 
-                                 {/* Top Right Controls (Pointer events enabled for buttons) */}
                                  {!isSelectionMode && (
-                                     <div className="flex gap-2 pointer-events-auto">
-                                         {/* Favorite Button (Always visible if favorited, else on hover) */}
+                                     <div className="flex gap-2 pointer-events-auto items-start">
+                                         {song.bestResult && (
+                                             <div className={`px-2 py-1 rounded-lg backdrop-blur-md border border-white/10 bg-black/60 flex flex-col items-center shadow-lg ${song.bestResult.rank === 'S+' || song.bestResult.rank === 'SS' || song.bestResult.rank === 'OPUS' ? 'border-neon-blue/30' : ''}`}>
+                                                 <span className={`text-xl font-black italic leading-none ${song.bestResult.rank === 'S+' || song.bestResult.rank === 'SS' || song.bestResult.rank === 'OPUS' ? 'text-neon-blue drop-shadow-[0_0_8px_rgba(0,243,255,0.5)]' : 'text-white'}`}>
+                                                     {song.bestResult.rank}
+                                                 </span>
+                                             </div>
+                                         )}
+
                                          <button 
                                             onClick={(e) => handleToggleFavorite(song.id, e)}
                                             className={`p-2 backdrop-blur-md rounded-lg border transition-all ${song.isFavorite ? 'bg-neon-pink/20 border-neon-pink text-neon-pink' : 'bg-black/40 border-white/5 text-white hover:bg-white/20 opacity-0 group-hover:opacity-100'}`}
@@ -487,7 +388,6 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
                                              >
                                                  <Info className="w-4 h-4" />
                                              </button>
-                                             {/* Removed Edit Button Here as requested */}
                                              <button 
                                                 onClick={(e) => startEdit(song, e)}
                                                 className="p-2 bg-black/40 backdrop-blur-md rounded-lg text-white hover:bg-white/20 border border-white/5"
@@ -499,7 +399,6 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
                                      </div>
                                  )}
                                  
-                                 {/* Selection Checkbox */}
                                  {isSelectionMode && (
                                      <div className="pointer-events-auto">
                                          <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-colors ${selectedIds.has(song.id) ? 'bg-neon-blue border-neon-blue text-black' : 'border-white/30 bg-black/40'}`}>
@@ -509,16 +408,6 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
                                  )}
                              </div>
 
-                             {/* Middle Rank (Centered) */}
-                             {song.bestResult && (
-                                 <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none w-full text-center">
-                                     <div className={`text-6xl font-black italic drop-shadow-[0_0_30px_rgba(0,0,0,0.8)] opacity-30 group-hover:opacity-100 transition-all duration-500 scale-75 group-hover:scale-100 ${song.bestResult.rank === 'S' || song.bestResult.rank === 'OPUS' || song.bestResult.rank === 'DIVINE' ? 'text-neon-blue' : 'text-white'}`}>
-                                         {song.bestResult.rank}
-                                     </div>
-                                 </div>
-                             )}
-
-                             {/* Bottom Info */}
                              <div className="pointer-events-auto">
                                  {editingId === song.id ? (
                                       <div className="flex flex-col gap-2 bg-black/80 p-2 rounded-xl backdrop-blur-md" onClick={e => e.stopPropagation()}>
@@ -542,13 +431,24 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
                                         <h3 className="text-xl font-black text-white leading-tight truncate drop-shadow-md mb-1">{song.title}</h3>
                                         <p className="text-xs text-white/70 font-bold uppercase tracking-wider mb-3 truncate">{song.artist}</p>
                                         
-                                        <div className="flex items-center gap-3 text-[10px] font-bold text-white/50 uppercase tracking-widest">
-                                            <span className="flex items-center gap-1"><Clock className="w-3 h-3"/> {formatTime(song.duration)}</span>
-                                            <span className="w-1 h-1 bg-white/20 rounded-full"></span>
-                                            <span>{Math.round(song.structure.bpm)} BPM</span>
-                                            <span className="w-1 h-1 bg-white/20 rounded-full"></span>
-                                            <span className={`${song.laneCount === 6 ? 'text-purple-400' : 'text-neon-blue'}`}>{song.laneCount}K</span>
-                                        </div>
+                                        {song.bestResult ? (
+                                            <div className="flex items-center gap-3 text-[10px] font-bold uppercase tracking-widest bg-black/30 w-fit px-2 py-1 rounded-lg backdrop-blur-sm border border-white/5">
+                                                <span className="text-white flex items-center gap-1">
+                                                    <Trophy className="w-3 h-3 text-yellow-500" />
+                                                    {(song.bestResult.score / 10000).toFixed(0)}万
+                                                </span>
+                                                <span className="w-1 h-1 bg-white/20 rounded-full"></span>
+                                                <span className="text-neon-blue">{calculateAccuracy(song.bestResult.perfect, song.bestResult.good, song.notes.length)}%</span>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center gap-3 text-[10px] font-bold text-white/50 uppercase tracking-widest">
+                                                <span className="flex items-center gap-1"><Clock className="w-3 h-3"/> {formatTime(song.duration)}</span>
+                                                <span className="w-1 h-1 bg-white/20 rounded-full"></span>
+                                                <span>{Math.round(song.structure.bpm)} BPM</span>
+                                                <span className="w-1 h-1 bg-white/20 rounded-full"></span>
+                                                <span className={`${song.laneCount === 6 ? 'text-purple-400' : 'text-neon-blue'}`}>{song.laneCount}K</span>
+                                            </div>
+                                        )}
                                      </>
                                  )}
                              </div>
@@ -558,7 +458,7 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
               })}
           </div>
           
-          {processedSongs.length === 0 && !onInstallDemo && (
+          {processedSongs.length === 0 && (
               <div className="h-64 flex flex-col items-center justify-center text-gray-500 opacity-60 gap-4">
                   <div className="relative">
                       <Disc className="w-16 h-16 animate-spin-slow" />
@@ -572,11 +472,9 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
           )}
       </div>
 
-      {/* Hidden Inputs */}
       <input ref={audioInputRef} type="file" accept="audio/*" onChange={onImportAudioClick} className="hidden" />
       <input ref={mapInputRef} type="file" multiple accept=".json,.zip,.nfz,application/json,application/zip,application/octet-stream" onChange={onImportMapClick} className="hidden" />
 
-      {/* --- Details Modal --- */}
       {detailSong && (
           <SongDetailsModal 
             song={detailSong} 
@@ -586,7 +484,6 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
           />
       )}
 
-      {/* --- Export Modal --- */}
       {showExportModal && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
               <div className="bg-[#0f172a] border border-white/20 rounded-2xl p-6 w-full max-w-sm shadow-2xl relative">
@@ -619,7 +516,6 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
           </div>
       )}
 
-      {/* --- Delete Confirmation Modal --- */}
       {showDeleteConfirm && (
           <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
               <div className="bg-[#0f172a] border border-red-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl relative">
@@ -644,40 +540,6 @@ export const LibraryScreen: React.FC<LibraryScreenPropsWithDemo> = ({
                         className="py-3 rounded-xl bg-red-500 text-white font-bold hover:bg-red-600 transition-colors shadow-lg"
                       >
                           删除
-                      </button>
-                  </div>
-              </div>
-          </div>
-      )}
-
-      {/* --- Demo Album Install Confirmation --- */}
-      {showDemoConfirm && (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
-              <div className="bg-[#0f172a] border border-indigo-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl relative">
-                  <div className="flex items-center gap-3 text-indigo-400 font-black text-xl mb-4">
-                      <CloudDownload className="w-6 h-6" />
-                      安装演示专辑
-                  </div>
-                  <p className="text-gray-300 text-sm mb-6 leading-relaxed">
-                      即将下载并解压 <span className="text-white font-bold">"万象回响"</span> 专辑资源。<br/>
-                      这可能需要消耗少量流量。
-                  </p>
-                  
-                  <div className="grid grid-cols-2 gap-3">
-                      <button 
-                        onClick={() => setShowDemoConfirm(false)}
-                        className="py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold transition-colors"
-                      >
-                          取消
-                      </button>
-                      <button 
-                        onClick={() => {
-                            setShowDemoConfirm(false);
-                            if (onInstallDemo) onInstallDemo();
-                        }}
-                        className="py-3 rounded-xl bg-indigo-500 text-white font-bold hover:bg-indigo-600 transition-colors shadow-lg"
-                      >
-                          开始加载
                       </button>
                   </div>
               </div>

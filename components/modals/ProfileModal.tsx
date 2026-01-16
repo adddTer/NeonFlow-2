@@ -1,7 +1,8 @@
+
 import React, { useMemo } from 'react';
 import { X, Trophy, Music, Activity, Target, Zap, Clock, Star } from 'lucide-react';
 import { SavedSong } from '../../types';
-import { calculateRating } from '../../utils/scoring';
+import { calculateRating, calculateGrade } from '../../utils/scoring';
 
 interface ProfileModalProps {
     songs: SavedSong[];
@@ -17,14 +18,23 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ songs, onClose }) =>
         let totalPlayCount = 0;
         let clearedSongs = 0;
         let fullCombos = 0;
-        const rankCounts: Record<string, number> = { 'OPUS': 0, 'DIVINE': 0, 'S': 0, 'A': 0, 'B': 0, 'C': 0, 'D': 0 };
+        
+        // Initialize with new Rank keys
+        const rankCounts: Record<string, number> = { 
+            'φ': 0, 
+            'SSS': 0, 
+            'SS': 0, 
+            'S': 0, 
+            'A': 0, 
+            'B': 0, 
+            'C': 0, 
+            'D': 0 
+        };
 
-        // Calculate Ratings
         const ratings = songs
             .map(s => {
                 if (!s.bestResult) return 0;
-                const acc = (s.bestResult.perfect + s.bestResult.good) / (s.notes.length || 1);
-                return calculateRating(s.difficultyRating, acc);
+                return calculateRating(s.difficultyRating, s.bestResult.score);
             })
             .sort((a, b) => b - a);
         
@@ -37,12 +47,20 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ songs, onClose }) =>
                 totalScore += song.bestResult.score;
                 totalNotesHit += (song.bestResult.perfect + song.bestResult.good);
                 totalNotesPossible += song.notes.length;
-                if (song.bestResult.rank !== 'D') clearedSongs++;
+                
+                // Recalculate rank to ensure consistency with new tier system
+                // (e.g. if DB has old 'S' but score is now 'SS')
+                const { rank } = calculateGrade(song.bestResult.score);
+                
+                if (rank !== 'D') clearedSongs++;
                 if (song.bestResult.maxCombo === song.notes.length) fullCombos++;
                 
-                const r = song.bestResult.rank;
-                if (rankCounts[r] !== undefined) rankCounts[r]++;
-                else rankCounts[r] = 0;
+                if (rankCounts[rank] !== undefined) rankCounts[rank]++;
+                else {
+                    // Fallback for any legacy ranks not in our list
+                    // (Though recalculation above should fix this)
+                    rankCounts[rank] = (rankCounts[rank] || 0) + 1;
+                }
             }
         });
 
@@ -117,29 +135,53 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ songs, onClose }) =>
                         <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4 flex items-center gap-2">
                             <Star className="w-4 h-4" /> 评价分布
                         </h3>
-                        <div className="bg-black/40 rounded-2xl p-6 border border-white/5 flex flex-wrap justify-around items-end gap-4 h-48 relative">
-                             {['OPUS', 'DIVINE', 'S', 'A', 'B', 'C', 'D'].map(rank => {
+                        <div className="bg-black/40 rounded-2xl p-6 border border-white/5 flex flex-wrap justify-around items-end gap-2 h-56 relative overflow-hidden">
+                             {['φ', 'SSS', 'SS', 'S', 'A', 'B', 'C', 'D'].map(rank => {
                                  const count = stats.rankCounts[rank] || 0;
                                  const max = Math.max(...(Object.values(stats.rankCounts) as number[]), 1);
-                                 const height = Math.max((count / max) * 100, 5); // Min 5% height
+                                 // Use a logarithmic scale for visualization so small counts are visible
+                                 const height = count === 0 ? 0 : Math.max((count / max) * 100, 10); 
                                  
-                                 let color = 'bg-gray-700';
-                                 if (rank === 'OPUS') color = 'bg-neon-purple shadow-[0_0_15px_rgba(189,0,255,0.5)]';
-                                 if (rank === 'DIVINE') color = 'bg-neon-pink shadow-[0_0_15px_rgba(255,0,255,0.5)]';
-                                 if (rank === 'S') color = 'bg-neon-blue';
-                                 if (rank === 'A') color = 'bg-green-500';
-                                 if (rank === 'B') color = 'bg-yellow-500';
+                                 let colorClass = 'bg-gray-700';
+                                 let shadowClass = '';
+                                 let textClass = 'text-gray-500';
+
+                                 if (rank === 'φ') {
+                                     colorClass = 'bg-cyan-200';
+                                     shadowClass = 'shadow-[0_0_20px_rgba(165,243,252,0.6)]';
+                                     textClass = 'text-cyan-200';
+                                 }
+                                 else if (rank === 'SSS') {
+                                     colorClass = 'bg-neon-pink';
+                                     shadowClass = 'shadow-[0_0_15px_rgba(255,0,255,0.5)]';
+                                     textClass = 'text-neon-pink';
+                                 }
+                                 else if (rank === 'SS') {
+                                     colorClass = 'bg-yellow-400';
+                                     shadowClass = 'shadow-[0_0_10px_rgba(250,204,21,0.4)]';
+                                     textClass = 'text-yellow-400';
+                                 }
+                                 else if (rank === 'S') {
+                                     colorClass = 'bg-neon-blue';
+                                     textClass = 'text-neon-blue';
+                                 }
+                                 else if (rank === 'A') { colorClass = 'bg-green-500'; textClass = 'text-green-500'; }
+                                 else if (rank === 'B') { colorClass = 'bg-gray-300'; textClass = 'text-gray-300'; }
+                                 else if (rank === 'C') { colorClass = 'bg-orange-500'; textClass = 'text-orange-500'; }
+                                 else if (rank === 'D') { colorClass = 'bg-red-500'; textClass = 'text-red-500'; }
                                  
                                  return (
-                                     <div key={rank} className="flex-1 h-full flex flex-col items-center justify-end group">
-                                         <div className="mb-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs font-bold text-white bg-black/80 px-2 py-1 rounded absolute top-0">
-                                             {count} 曲
+                                     <div key={rank} className="flex-1 h-full flex flex-col items-center justify-end group min-w-[30px]">
+                                         <div className="mb-2 opacity-0 group-hover:opacity-100 transition-opacity text-xs font-bold text-white bg-black/90 px-2 py-1 rounded absolute top-2 border border-white/10 z-10 pointer-events-none">
+                                             {count} 首
                                          </div>
                                          <div 
-                                            className={`w-full max-w-[40px] rounded-t-lg transition-all duration-500 ${color} opacity-80 group-hover:opacity-100`} 
+                                            className={`w-full max-w-[40px] rounded-t-lg transition-all duration-500 ${colorClass} ${shadowClass} opacity-80 group-hover:opacity-100 relative`} 
                                             style={{ height: `${height}%` }}
-                                         ></div>
-                                         <div className="mt-2 text-xs font-black text-gray-500">{rank}</div>
+                                         >
+                                             {count > 0 && <div className="absolute top-0 left-0 w-full h-[1px] bg-white/50"></div>}
+                                         </div>
+                                         <div className={`mt-3 text-xs md:text-sm font-black ${textClass}`}>{rank}</div>
                                      </div>
                                  )
                              })}

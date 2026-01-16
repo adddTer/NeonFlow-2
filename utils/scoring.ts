@@ -5,63 +5,82 @@ export interface GradeResult {
     rank: string;
     color: string;
     label: string;
+    shadow?: string;
 }
 
-export const calculateGrade = (perfect: number, good: number, miss: number, total: number): GradeResult => {
-    if (total === 0) return { rank: '?', color: 'text-gray-500', label: '未知' };
+// --- 1. Grade Calculation (Based on 1,000,000 Score) ---
+export const calculateGrade = (rawScore: number): GradeResult => {
+    // Score is now 0 - 1,000,000
+    // FIX: Round to nearest integer to handle floating point errors (e.g. 999999.99 -> 1000000)
+    // This matches the UI display logic in ResultScreen.
+    const score = Math.round(rawScore);
 
-    const hitCount = perfect + good;
-    const accuracy = hitCount / total;
-    const isFullCombo = miss === 0;
-
-    // 必须与 ResultScreen 和 App.tsx 中的逻辑保持完全一致
-    // Stricter Grading Scale
-    if (perfect === total) {
-        return { rank: 'OPUS', color: 'text-neon-purple drop-shadow-[0_0_20px_rgba(189,0,255,0.8)]', label: '收歌' };
-    }
-    // Divine requires FC and > 99.5% accuracy (almost all perfect)
-    if (isFullCombo && accuracy >= 0.995) {
-        return { rank: 'DIVINE', color: 'text-neon-pink drop-shadow-[0_0_15px_rgba(255,0,255,0.6)]', label: '神圣' };
-    }
-    // S requires 98%
-    if (accuracy >= 0.98) return { rank: 'S', color: 'text-neon-blue', label: '极佳' };
-    // A requires 95%
-    if (accuracy >= 0.95) return { rank: 'A', color: 'text-green-400', label: '优秀' };
-    // B requires 90%
-    if (accuracy >= 0.90) return { rank: 'B', color: 'text-yellow-400', label: '良好' };
-    // C requires 80%
-    if (accuracy >= 0.80) return { rank: 'C', color: 'text-orange-400', label: '合格' };
+    if (score >= 1000000) return { 
+        rank: 'φ', // Phi (Theoretical Perfect)
+        color: 'text-cyan-200', 
+        label: '理论值', 
+        shadow: 'drop-shadow-[0_0_25px_rgba(165,243,252,0.8)]'
+    };
+    if (score >= 995000) return { 
+        rank: 'SSS', 
+        color: 'text-neon-pink', 
+        label: '神乎其技', 
+        shadow: 'drop-shadow-[0_0_15px_rgba(255,0,255,0.6)]'
+    };
+    if (score >= 990000) return { 
+        rank: 'SS', 
+        color: 'text-yellow-400', 
+        label: '精彩绝伦',
+        shadow: 'drop-shadow-[0_0_15px_rgba(250,204,21,0.5)]'
+    };
+    if (score >= 970000) return { rank: 'S', color: 'text-neon-blue', label: '名列前茅' }; 
+    if (score >= 930000) return { rank: 'A', color: 'text-green-400', label: '优秀' }; 
+    if (score >= 850000) return { rank: 'B', color: 'text-gray-200', label: '合格' }; 
+    if (score >= 700000) return { rank: 'C', color: 'text-orange-400', label: '勉强' }; 
     
-    return { rank: 'D', color: 'text-red-600', label: '失败' };
+    return { rank: 'D', color: 'text-red-500', label: '失败' }; 
 };
 
 export const calculateAccuracy = (perfect: number, good: number, total: number): number => {
     if (total === 0) return 0;
-    return Math.floor(((perfect + good) / total) * 100);
+    // Standard VSRG Weight: Perfect 100%, Good 60%, Miss 0%
+    const totalPoints = (perfect * 1.0) + (good * 0.6);
+    return Math.floor((totalPoints / total) * 100);
 };
 
 /**
- * Calculates a Performance Rating (R) based on chart difficulty and player accuracy.
- * @param difficulty The calculated difficulty rating of the chart (e.g., 12.5)
- * @param accuracy The player's accuracy as a decimal (0.0 to 1.0)
- * @returns The rating value
+ * --- 2. Piecewise Linear Rating Algorithm ---
+ * Same logic, just ensuring consistency with new tiers if needed.
  */
-export const calculateRating = (difficulty: number, accuracy: number): number => {
-    if (accuracy < 0.8) return 0; // Too low to count
+export const calculateRating = (difficulty: number, score: number): number => {
+    if (difficulty === 0) return 0;
 
     let rating = 0;
     
-    // Base potential is the difficulty
-    // We punish accuracy drop-off exponentially
-    if (accuracy >= 0.99) {
-        // Bonus for extremely high acc
-        rating = difficulty + (accuracy - 0.99) * 2;
-    } else if (accuracy >= 0.98) {
-        rating = difficulty;
-    } else {
-        // Curve: At 90% acc, you get about 80% of the difficulty value
-        const factor = Math.pow((accuracy - 0.8) / 0.18, 2); 
-        rating = difficulty * factor * 0.9;
+    // Normalize score cap
+    const val = Math.min(score, 1000000);
+
+    if (val >= 1000000) {
+        // Max Score Bonus
+        rating = difficulty + 2.0;
+    } 
+    else if (val >= 990000) {
+        // 990k - 1M
+        rating = difficulty + 1.0 + ((val - 990000) / 10000);
+    } 
+    else if (val >= 970000) {
+        // 970k - 990k
+        rating = difficulty + ((val - 970000) / 20000);
+    }
+    else if (val >= 800000) {
+        // 800k - 970k
+        const ratio = (val - 800000) / 170000; 
+        const minRating = difficulty * 0.6;
+        rating = minRating + (ratio * (difficulty - minRating));
+    }
+    else {
+        // < 800k
+        rating = difficulty * 0.6 * (Math.max(0, val) / 800000);
     }
 
     return Math.max(0, parseFloat(rating.toFixed(2)));

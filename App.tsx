@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
-import { Music, Settings, ArrowLeft, Play, Clock, Pause, LogOut, Bug, AlertTriangle, Zap, Gauge, Eye, EyeOff, FastForward, Rewind, Crosshair, Skull, Flashlight, Bot } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Play, Clock, Pause, LogOut, AlertTriangle, Zap, FastForward, Rewind, Crosshair, Skull, EyeOff, Flashlight, Bot, RotateCcw, ArrowLeft } from 'lucide-react';
 import { getSongById, saveSong } from './services/storageService';
 import { calculateGrade } from './utils/scoring';
 import GameCanvas from './components/GameCanvas';
@@ -9,11 +9,14 @@ import { ResultScreen } from './components/screens/ResultScreen';
 import { AudioCalibration } from './components/screens/AudioCalibration';
 import { EditorScreen } from './components/screens/EditorScreen';
 import { LoadingScreen } from './components/ui/LoadingScreen';
+import { OnboardingOverlay } from './components/ui/OnboardingOverlay';
 import { MetadataDebugger } from './components/debug/MetadataDebugger';
 import { Note, GameStatus, ScoreState, AITheme, DEFAULT_THEME, SavedSong, GameResult, SongStructure, GameModifier } from './types';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { SongConfigModal } from './components/modals/SongConfigModal';
 import { ProfileModal } from './components/modals/ProfileModal';
+import { Header } from './components/layout/Header';
+import { Footer } from './components/layout/Footer';
 
 // Hooks
 import { useAppSettings } from './hooks/useAppSettings';
@@ -23,6 +26,7 @@ import { useSongGenerator } from './hooks/useSongGenerator';
 function App() {
   // --- Game Session State ---
   const [status, setStatus] = useState<GameStatus>(GameStatus.Library);
+  const [gameSessionId, setGameSessionId] = useState(0); 
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
   const [structure, setStructure] = useState<SongStructure | undefined>(undefined);
@@ -36,14 +40,19 @@ function App() {
   const [isSongLoading, setIsSongLoading] = useState(false);
   const [activeModifiers, setActiveModifiers] = useState<Set<GameModifier>>(new Set());
 
-  // --- UI Toggles ---
+  // --- UI Toggles & Interaction ---
   const [showSettings, setShowSettings] = useState(false);
   const [showCalibration, setShowCalibration] = useState(false);
   const [showMetadataDebug, setShowMetadataDebug] = useState(false);
   const [showQuitConfirm, setShowQuitConfirm] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [rebindingKey, setRebindingKey] = useState<{mode: 4|6, index: number} | null>(null);
   const [titleClickCount, setTitleClickCount] = useState(0);
+  
+  // Double-tap Pause State
+  const [pauseRequestTime, setPauseRequestTime] = useState(0);
+  const pauseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // --- Custom Hooks ---
   const { 
@@ -53,12 +62,37 @@ function App() {
   } = useAppSettings();
 
   const {
-    librarySongs, isLibraryLoading, loadLibrary, handleImportMap, handleInstallDemo
+    librarySongs, isLibraryLoading, loadLibrary, handleImportMap
   } = useSongLibrary();
+
+  // Onboarding Check
+  useEffect(() => {
+      const hasSeen = localStorage.getItem('neonflow_intro_shown');
+      if (!hasSeen) {
+          setShowOnboarding(true);
+      }
+  }, []);
+
+  const completeOnboarding = () => {
+      localStorage.setItem('neonflow_intro_shown', 'true');
+      setShowOnboarding(false);
+  };
+
+  const restartTutorial = () => {
+      setShowSettings(false);
+      setShowOnboarding(true);
+  };
+
+  const handleGeneratorError = (errType: string) => {
+      if (errType === 'API_KEY_MISSING' || errType === 'API_INVALID') {
+          // Jump to settings
+          setShowSettings(true);
+      }
+  };
 
   const {
     pendingFile, setPendingFile, isConfiguringSong, setIsConfiguringSong,
-    loadingStage, setLoadingStage, loadingSubText, setLoadingSubText,
+    loadingStage, setLoadingStage, loadingSubText, setLoadingSubText, loadingProgress,
     errorMessage, setErrorMessage, onFileSelect, handleCreateBeatmap,
     selectedLaneCount, setSelectedLaneCount, selectedPlayStyle, setSelectedPlayStyle,
     selectedDifficulty, setSelectedDifficulty, aiOptions, setAiOptions,
@@ -67,20 +101,21 @@ function App() {
       customApiKey || process.env.API_KEY || "", 
       isDebugMode, 
       apiKeyStatus, 
-      loadLibrary // Reload library on success
+      loadLibrary,
+      handleGeneratorError
   );
 
   // --- Logic Wrappers ---
 
   const executeCreateBeatmap = async (options?: { empty?: boolean }) => {
-      setStatus(GameStatus.Analyzing); // Show loading screen immediately
+      setStatus(GameStatus.Analyzing); 
       const result = await handleCreateBeatmap(options);
       if (result?.success) {
           setStatus(GameStatus.Library);
           setSongName(result.songTitle || "");
       } else {
           setStatus(GameStatus.Library);
-          if (result?.error === 'API_KEY_MISSING') setShowSettings(true);
+          // Error handled by callback
       }
   };
 
@@ -91,16 +126,6 @@ function App() {
           setLoadingSubText(sub);
       });
       setStatus(GameStatus.Library);
-      setLoadingStage("");
-      setLoadingSubText("");
-  };
-
-  const executeInstallDemo = async () => {
-      // Wrapper to connect useSongLibrary's handler with loading screen state
-      await handleInstallDemo(setStatus, (stage, sub) => {
-          setLoadingStage(stage);
-          setLoadingSubText(sub);
-      });
       setLoadingStage("");
       setLoadingSubText("");
   };
@@ -134,21 +159,27 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [rebindingKey, keyConfig]);
 
-  // Visibility Auto-Pause
+  // Auto-Pause
   useEffect(() => {
-    const handleVisibilityChange = () => {
-        if (document.hidden && status === GameStatus.Playing && !activeModifiers.has(GameModifier.Auto)) {
+    const handleAutoPause = () => {
+        if (status === GameStatus.Playing && !activeModifiers.has(GameModifier.Auto)) {
             setStatus(GameStatus.Paused);
         }
     };
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+    const onVisibilityChange = () => { if (document.hidden) handleAutoPause(); };
+    const onBlur = () => { handleAutoPause(); };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("blur", onBlur);
+    return () => {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+        window.removeEventListener("blur", onBlur);
+    };
   }, [status, activeModifiers]);
 
   // Global Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.code === 'Space' && status === GameStatus.Ready && !showSettings && !isConfiguringSong && !showMetadataDebug && !rebindingKey) {
+        if (e.code === 'Space' && status === GameStatus.Ready && !showSettings && !isConfiguringSong && !showMetadataDebug && !rebindingKey && !showOnboarding) {
             e.preventDefault();
             startCountdown();
         }
@@ -159,7 +190,7 @@ function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [status, showSettings, isConfiguringSong, showMetadataDebug, rebindingKey]);
+  }, [status, showSettings, isConfiguringSong, showMetadataDebug, rebindingKey, showOnboarding]);
 
   // Countdown Logic
   useEffect(() => {
@@ -191,7 +222,6 @@ function App() {
           if (mod === GameModifier.HalfTime) newMods.delete(GameModifier.DoubleTime);
           if (mod === GameModifier.SuddenDeath) newMods.delete(GameModifier.Auto);
           if (mod === GameModifier.Auto) newMods.delete(GameModifier.SuddenDeath);
-          
           newMods.add(mod);
       }
       setActiveModifiers(newMods);
@@ -229,19 +259,50 @@ function App() {
       setStatus(GameStatus.Editing);
   };
 
-  const handleEditorExit = () => {
-      setStatus(GameStatus.Library);
-      setEditingSong(null);
+  const startCountdown = () => { 
+      setStatus(GameStatus.Countdown); 
+      setCountdown(3); 
+  };
+  
+  const pauseGame = () => { 
+      if (status === GameStatus.Playing) setStatus(GameStatus.Paused); 
+  };
+  
+  const handlePauseRequest = (e: React.MouseEvent | React.TouchEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const now = Date.now();
+      if (now - pauseRequestTime < 1000) {
+          if (pauseTimeoutRef.current) clearTimeout(pauseTimeoutRef.current);
+          setPauseRequestTime(0);
+          pauseGame();
+      } else {
+          setPauseRequestTime(now);
+          if (pauseTimeoutRef.current) clearTimeout(pauseTimeoutRef.current);
+          pauseTimeoutRef.current = setTimeout(() => setPauseRequestTime(0), 1000);
+      }
   };
 
-  const handleEditorSave = async () => {
-      await loadLibrary();
+  const resumeGame = () => { 
+      if (status === GameStatus.Paused) { 
+          setStatus(GameStatus.Countdown); 
+          setCountdown(3); 
+          setPauseRequestTime(0);
+      } 
   };
 
-  const startCountdown = () => { setStatus(GameStatus.Countdown); setCountdown(3); };
-  const pauseGame = () => { if (status === GameStatus.Playing) setStatus(GameStatus.Paused); };
-  const resumeGame = () => { if (status === GameStatus.Paused) { setStatus(GameStatus.Countdown); setCountdown(3); } };
-  const confirmQuit = () => { setShowQuitConfirm(false); setStatus(GameStatus.Library); setScore({ score: 0, combo: 0, maxCombo: 0, perfect: 0, good: 0, miss: 0, hitHistory: [], modifiers: [] }); };
+  const restartGame = () => {
+      setScore({ score: 0, combo: 0, maxCombo: 0, perfect: 0, good: 0, miss: 0, hitHistory: [], modifiers: [] });
+      setGameSessionId(prev => prev + 1); 
+      setStatus(GameStatus.Countdown);
+      setCountdown(3);
+      setPauseRequestTime(0);
+  };
+
+  const confirmQuit = () => { 
+      setShowQuitConfirm(false); 
+      backToLibrary();
+  };
 
   const handleGameEnd = async (finalScore?: ScoreState) => {
     setStatus(GameStatus.Finished);
@@ -250,14 +311,14 @@ function App() {
     if (currentSongId) {
         const fullSong = await getSongById(currentSongId);
         if (fullSong) {
-            // Always increment play count (even if Auto mod, just as a usage stat)
+            // Always increment play count
             const updatedSong = { ...fullSong, playCount: (fullSong.playCount || 0) + 1 };
             
-            // Don't save Score if Auto mod is on
-            if (!activeModifiers.has(GameModifier.Auto)) {
-                 const { rank } = calculateGrade(resultScore.perfect, resultScore.good, resultScore.miss, notes.length);
+            // Only save record if NO MODS are active.
+            if (activeModifiers.size === 0) {
+                 const { rank } = calculateGrade(resultScore.score);
                  const newResult: GameResult = {
-                    score: Math.floor(resultScore.score),
+                    score: Math.round(resultScore.score),
                     maxCombo: resultScore.maxCombo,
                     perfect: resultScore.perfect,
                     good: resultScore.good,
@@ -265,7 +326,7 @@ function App() {
                     rank: rank,
                     timestamp: Date.now(),
                     hitHistory: resultScore.hitHistory,
-                    modifiers: Array.from(activeModifiers)
+                    modifiers: []
                  };
                  
                  if (!updatedSong.bestResult || newResult.score > updatedSong.bestResult.score) {
@@ -289,25 +350,24 @@ function App() {
     setLoadingStage("");
     setLoadingSubText("");
     setErrorMessage(null);
+    setPauseRequestTime(0);
   };
 
-  const isGameActive = status === GameStatus.Playing || status === GameStatus.Countdown || status === GameStatus.Paused;
-
-  // Optimized Mod List
   const MODS_LIST = [
-      { id: GameModifier.DoubleTime, label: 'DT', name: 'Double Time', icon: <FastForward className="w-5 h-5"/>, color: 'text-red-400', desc: '1.5倍速 (分数+20%)' },
-      { id: GameModifier.HalfTime, label: 'HT', name: 'Half Time', icon: <Rewind className="w-5 h-5"/>, color: 'text-blue-400', desc: '0.75倍速 (分数-50%)' },
-      { id: GameModifier.HardRock, label: 'HR', name: 'Hard Rock', icon: <Crosshair className="w-5 h-5"/>, color: 'text-orange-400', desc: '严苛判定 (分数+10%)' },
-      { id: GameModifier.SuddenDeath, label: 'SD', name: 'Sudden Death', icon: <Skull className="w-5 h-5"/>, color: 'text-gray-400', desc: '失误即死 (无加成)' },
-      { id: GameModifier.Hidden, label: 'HD', name: 'Hidden', icon: <EyeOff className="w-5 h-5"/>, color: 'text-purple-400', desc: '隐形音符 (分数+6%)' },
-      { id: GameModifier.Flashlight, label: 'FL', name: 'Flashlight', icon: <Flashlight className="w-5 h-5"/>, color: 'text-yellow-400', desc: '受限视野 (分数+12%)' },
-      { id: GameModifier.Auto, label: 'Auto', name: 'Auto Play', icon: <Bot className="w-5 h-5"/>, color: 'text-green-400', desc: '全连演示 (不计分)' },
+      { id: GameModifier.DoubleTime, label: 'DT', name: 'Double Time', icon: <FastForward className="w-5 h-5"/>, color: 'text-red-400', desc: '1.5倍速 (无分数加成)' },
+      { id: GameModifier.HalfTime, label: 'HT', name: 'Half Time', icon: <Rewind className="w-5 h-5"/>, color: 'text-blue-400', desc: '0.75倍速' },
+      { id: GameModifier.HardRock, label: 'HR', name: 'Hard Rock', icon: <Crosshair className="w-5 h-5"/>, color: 'text-orange-400', desc: '严苛判定' },
+      { id: GameModifier.SuddenDeath, label: 'SD', name: 'Sudden Death', icon: <Skull className="w-5 h-5"/>, color: 'text-gray-400', desc: '失误即死' },
+      { id: GameModifier.Hidden, label: 'HD', name: 'Hidden', icon: <EyeOff className="w-5 h-5"/>, color: 'text-purple-400', desc: '隐形音符' },
+      { id: GameModifier.Flashlight, label: 'FL', name: 'Flashlight', icon: <Flashlight className="w-5 h-5"/>, color: 'text-yellow-400', desc: '受限视野' },
+      { id: GameModifier.Auto, label: 'Auto', name: 'Auto Play', icon: <Bot className="w-5 h-5"/>, color: 'text-green-400', desc: '自动演示' },
   ];
 
   return (
     <div className="h-[100dvh] w-full flex flex-col transition-colors duration-1000 font-sans text-white select-none relative overflow-hidden" style={{ background: status === GameStatus.Library ? '#030304' : `radial-gradient(circle at center, ${theme.secondaryColor}22 0%, #030304 100%)` }}>
       
       {/* Modals & Overlays */}
+      {showOnboarding && <OnboardingOverlay onComplete={completeOnboarding} />}
       {showCalibration && <AudioCalibration initialOffset={audioOffset} onClose={(newOffset) => { setAudioOffset(newOffset); localStorage.setItem('neonflow_audio_offset', String(newOffset)); setShowCalibration(false); setShowSettings(true); }} />}
       {showMetadataDebug && <MetadataDebugger onClose={() => { setShowMetadataDebug(false); setShowSettings(true); }} />}
       {showProfile && <ProfileModal songs={librarySongs} onClose={() => setShowProfile(false)} />}
@@ -335,43 +395,24 @@ function App() {
             apiKeyStatus={apiKeyStatus} customApiKey={customApiKey} setCustomApiKey={setCustomApiKey}
             handleSaveSettings={() => handleSaveSettings(() => setShowSettings(false))} validationError={validationError}
             rebindingKey={rebindingKey} setRebindingKey={setRebindingKey} hasEnvKey={hasEnvKey}
+            onRestartTutorial={restartTutorial} // Pass the restart function
         />
       )}
 
       {isSongLoading && <LoadingScreen text="加载乐谱" subText="引擎预热中..." />}
-      {status === GameStatus.Analyzing && <LoadingScreen text={loadingStage || "请稍候"} subText={loadingSubText} />}
+      {status === GameStatus.Analyzing && <LoadingScreen text={loadingStage || "请稍候"} subText={loadingSubText} progress={loadingProgress} />}
       
-      {/* Header */}
-      {!isGameActive && status !== GameStatus.Editing && (
-          <header className="p-4 md:p-6 border-b border-white/5 bg-[#030304]/80 backdrop-blur-xl flex justify-between items-center z-40 sticky top-0 shrink-0">
-            <div className="flex items-center gap-3 group" onClick={backToLibrary}>
-              <div className="relative cursor-pointer">
-                  <div className="absolute inset-0 bg-neon-blue blur-lg opacity-20 group-hover:opacity-40 transition-opacity"></div>
-                  <Music className="w-7 h-7 md:w-8 md:h-8 relative z-10 transition-colors" style={{ color: status === GameStatus.Library ? '#00f3ff' : theme.primaryColor }} />
-              </div>
-              <div onClick={handleTitleClick} className="cursor-default">
-                  <h1 className="text-xl md:text-2xl font-black tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400 group-hover:to-white transition-all select-none">NEON<span style={{ color: status === GameStatus.Library ? '#00f3ff' : theme.primaryColor }}>FLOW 2</span></h1>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-                 <button onClick={() => setShowSettings(true)} disabled={status === GameStatus.Analyzing} className={`p-2.5 md:p-3 rounded-xl transition-all flex items-center gap-2 border ${status === GameStatus.Analyzing ? 'opacity-50 cursor-not-allowed border-transparent bg-transparent text-gray-600' : apiKeyStatus !== 'valid' ? 'text-red-400 border-red-500/30 bg-red-500/10 hover:bg-red-500/20' : 'text-gray-400 border-white/5 hover:text-white hover:bg-white/5'}`} title="设置">
-                   {apiKeyStatus !== 'valid' && status !== GameStatus.Analyzing && <span className="text-xs font-bold hidden md:inline">配置 API</span>}
-                   <Settings className="w-5 h-5" />
-                 </button>
-            </div>
-          </header>
-      )}
+      <Header 
+        status={status} 
+        theme={theme} 
+        apiKeyStatus={apiKeyStatus} 
+        onBack={backToLibrary} 
+        onSettings={() => setShowSettings(true)} 
+        onTitleClick={handleTitleClick}
+      />
 
-      {/* Main Content */}
       <main className="flex-1 relative flex flex-col items-center justify-center overflow-hidden w-full">
-        {/* Ambient Background */}
-        {status !== GameStatus.Library && status !== GameStatus.Playing && status !== GameStatus.Paused && status !== GameStatus.Editing && (
-            <div className="absolute inset-0 pointer-events-none transition-colors duration-1000">
-                <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] opacity-10 rounded-full blur-[150px]" style={{ backgroundColor: theme.primaryColor }} />
-                <div className="absolute bottom-1/4 right-1/4 w-[600px] h-[600px] opacity-10 rounded-full blur-[150px]" style={{ backgroundColor: theme.secondaryColor }} />
-            </div>
-        )}
-
+        {/* ... (Rest of the JSX remains mostly unchanged, just rendering screens based on status) ... */}
         {status === GameStatus.Library && (
             <LibraryScreen 
                 songs={librarySongs} isLoading={isLibraryLoading} hasApiKey={apiKeyStatus === 'valid' || isDebugMode}
@@ -379,15 +420,14 @@ function App() {
                 onEditSong={handleEditSong}
                 onRefreshLibrary={loadLibrary} onOpenSettings={() => setShowSettings(true)}
                 onOpenProfile={() => setShowProfile(true)}
-                onInstallDemo={executeInstallDemo} // Pass handler
             />
         )}
 
         {status === GameStatus.Editing && editingSong && (
             <EditorScreen 
                 song={editingSong} 
-                onExit={handleEditorExit} 
-                onSaveSuccess={handleEditorSave}
+                onExit={backToLibrary} 
+                onSaveSuccess={loadLibrary}
                 keyConfig={keyConfig}
             />
         )}
@@ -396,11 +436,10 @@ function App() {
           <div className="fixed inset-0 z-50 bg-[#0a0a0a] flex flex-col">
              <div className="absolute inset-0 overflow-hidden pointer-events-none">
                  <div className="absolute inset-0 opacity-20 blur-[120px]" style={{ background: `radial-gradient(circle at top center, ${theme.primaryColor}, transparent 60%)` }}></div>
-                 <div className="absolute inset-0 bg-black/60"></div>
                  <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20"></div>
              </div>
              
-             {/* Header */}
+             {/* Ready Screen Header */}
              <div className="relative z-50 flex justify-between items-center p-6 w-full shrink-0">
                 <button onClick={backToLibrary} className="group flex items-center justify-center w-12 h-12 rounded-full bg-white/5 border border-white/5 backdrop-blur-md hover:bg-white/10 active:scale-95 transition-all"><ArrowLeft className="w-6 h-6 text-white group-hover:-translate-x-1 transition-transform" /></button>
                 <div className="px-3 py-1 rounded-full bg-white/5 border border-white/5 backdrop-blur-md text-[10px] font-bold uppercase tracking-[0.2em] text-gray-500">任务简报</div>
@@ -416,7 +455,7 @@ function App() {
                              <div className="absolute inset-0 bg-gradient-to-br from-black via-transparent to-black opacity-60 z-10 rounded-full"></div>
                              <div className="w-40 h-40 md:w-56 md:h-56 rounded-full border-4 border-white/5 shadow-[0_0_60px_rgba(0,0,0,0.6)] relative overflow-hidden flex items-center justify-center bg-black">
                                   <div className="absolute inset-0 animate-spin-slow" style={{ background: `conic-gradient(from 0deg, ${theme.primaryColor}, ${theme.secondaryColor}, ${theme.primaryColor})`, opacity: 0.4, animationDuration: '8s' }}></div>
-                                  <Music className="w-16 h-16 text-white/40 relative z-20" />
+                                  <div className="text-white/40 font-black text-2xl relative z-20 select-none">NF</div>
                                   <div className="absolute inset-4 rounded-full border border-white/10"></div>
                              </div>
                          </div>
@@ -453,7 +492,7 @@ function App() {
                      {/* Mod Selectors */}
                      <div className="w-full bg-black/40 rounded-3xl border border-white/10 p-6">
                          <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-                             <Zap className="w-4 h-4" /> 游戏修改器
+                             <Zap className="w-4 h-4" /> 游戏修改器 <span className="text-[10px] text-gray-600 ml-auto">(开启后将不计入最佳成绩)</span>
                          </div>
                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                              {MODS_LIST.map(mod => {
@@ -490,9 +529,8 @@ function App() {
 
              {/* Footer Action */}
              <div className="absolute bottom-0 left-0 right-0 p-6 z-50 md:relative md:bg-transparent md:p-8 md:pt-0 flex justify-center bg-gradient-to-t from-black via-black/90 to-transparent">
-                <button onClick={startCountdown} className="group relative w-full max-w-md py-5 rounded-2xl overflow-hidden shadow-[0_0_40px_rgba(0,0,0,0.5)] transition-all hover:scale-[1.02] active:scale-95">
+                <button onClick={() => startCountdown()} className="group relative w-full max-w-md py-5 rounded-2xl overflow-hidden shadow-[0_0_40px_rgba(0,0,0,0.5)] transition-all hover:scale-[1.02] active:scale-95">
                     <div className="absolute inset-0 bg-white group-hover:bg-neon-blue transition-colors duration-500"></div>
-                    <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-30 mix-blend-overlay"></div>
                     <div className="relative z-10 flex items-center justify-center gap-3 text-black"><Play className="fill-current w-6 h-6" /><span className="text-xl font-black uppercase tracking-[0.2em]">启动引擎</span></div>
                 </button>
              </div>
@@ -501,20 +539,23 @@ function App() {
 
         {status === GameStatus.Paused && (
             <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-md flex items-center justify-center animate-fade-in">
-                 <div className="relative bg-[#0f172a]/80 border border-white/10 rounded-3xl p-8 w-full max-w-sm shadow-[0_0_50px_rgba(0,0,0,0.5)] text-center overflow-hidden">
-                     <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-neon-blue to-transparent opacity-50"></div>
-                     <div className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-neon-purple to-transparent opacity-50"></div>
-                     <div className="mb-8 relative z-10">
-                         <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/10 shadow-lg shadow-black/20"><Pause className="w-8 h-8 text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.5)]" /></div>
-                         <h2 className="text-3xl font-black text-white uppercase tracking-[0.2em] mb-1">PAUSED</h2>
-                         <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">System Halted</p>
+                 <div className="relative bg-[#0f172a]/90 border border-white/10 rounded-3xl p-6 w-full max-w-sm shadow-[0_0_50px_rgba(0,0,0,0.5)] text-center overflow-hidden">
+                     <div className="mb-6 relative z-10">
+                         <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-3 border border-white/10 shadow-lg shadow-black/20 animate-pulse">
+                             <Pause className="w-6 h-6 text-white" />
+                         </div>
+                         <h2 className="text-2xl font-black text-white uppercase tracking-[0.2em] mb-1">PAUSED</h2>
                      </div>
-                     <div className="space-y-4 relative z-10">
-                         <button onClick={resumeGame} className="w-full py-4 bg-neon-blue text-black font-black text-lg rounded-xl hover:bg-white hover:shadow-[0_0_20px_rgba(0,243,255,0.4)] transition-all uppercase tracking-widest flex items-center justify-center gap-2 group">
-                             <Play className="w-5 h-5 fill-current group-hover:scale-110 transition-transform" />继续游戏
+
+                     <div className="space-y-3 relative z-10">
+                         <button onClick={resumeGame} className="w-full py-3.5 bg-neon-blue text-black font-black text-base rounded-xl hover:bg-white hover:shadow-[0_0_20px_rgba(0,243,255,0.4)] transition-all uppercase tracking-widest flex items-center justify-center gap-2 group">
+                             <Play className="w-4 h-4 fill-current group-hover:scale-110 transition-transform" />继续游戏
                          </button>
-                         <button onClick={() => setShowQuitConfirm(true)} className="w-full py-4 bg-white/5 text-white font-bold text-lg rounded-xl hover:bg-white/10 hover:border-white/20 transition-all uppercase tracking-widest border border-white/5 flex items-center justify-center gap-2 group">
-                             <LogOut className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />退出
+                         <button onClick={restartGame} className="w-full py-3.5 bg-white/10 text-white font-bold text-base rounded-xl hover:bg-white/20 transition-all uppercase tracking-widest flex items-center justify-center gap-2 group">
+                             <RotateCcw className="w-4 h-4 group-hover:-rotate-90 transition-transform" />重新开始
+                         </button>
+                         <button onClick={() => setShowQuitConfirm(true)} className="w-full py-3.5 bg-red-500/10 text-red-400 font-bold text-base rounded-xl hover:bg-red-500 hover:text-white transition-all uppercase tracking-widest flex items-center justify-center gap-2 group">
+                             <LogOut className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />退出
                          </button>
                      </div>
                  </div>
@@ -522,10 +563,9 @@ function App() {
                     <div className="absolute inset-0 z-[110] bg-black/80 flex items-center justify-center animate-fade-in p-4 backdrop-blur-sm">
                         <div className="bg-[#0f172a] border border-red-500/30 rounded-2xl p-6 w-full max-w-xs shadow-2xl relative">
                             <h3 className="text-xl font-black text-red-400 mb-2 flex items-center gap-2"><AlertTriangle className="w-5 h-5"/> 确认退出</h3>
-                            <p className="text-gray-400 text-sm mb-6">当前进度将丢失，确定要返回主菜单吗？</p>
                             <div className="flex gap-3">
                                 <button onClick={() => setShowQuitConfirm(false)} className="flex-1 py-3 bg-white/10 rounded-xl font-bold hover:bg-white/20 transition-colors">取消</button>
-                                <button onClick={confirmQuit} className="flex-1 py-3 bg-red-500 rounded-xl font-bold hover:bg-red-600 text-white shadow-lg transition-colors">确认退出</button>
+                                <button onClick={confirmQuit} className="flex-1 py-3 bg-red-500 rounded-xl font-bold hover:bg-red-600 text-white shadow-lg transition-colors">确认</button>
                             </div>
                         </div>
                     </div>
@@ -541,7 +581,26 @@ function App() {
 
         {(status === GameStatus.Playing || status === GameStatus.Countdown || status === GameStatus.Paused) && (
             <div className="absolute inset-0 z-0 w-full h-full">
+                 {/* Pause Overlay Button */}
+                 {status === GameStatus.Playing && (
+                     <div 
+                        className="absolute top-4 left-4 z-[60] flex flex-col items-start gap-2"
+                        onClick={handlePauseRequest}
+                        onTouchStart={handlePauseRequest}
+                     >
+                         <button className="p-3 bg-black/40 backdrop-blur-md border border-white/10 rounded-xl text-white/50 hover:text-white hover:bg-white/10 transition-all active:scale-95">
+                             <Pause className="w-6 h-6" />
+                         </button>
+                         {pauseRequestTime > 0 && (
+                             <div className="bg-black/80 text-white text-xs font-bold px-3 py-1.5 rounded-lg animate-fade-in whitespace-nowrap border border-white/20 pointer-events-none">
+                                 再次点击暂停
+                             </div>
+                         )}
+                     </div>
+                 )}
+
                  <GameCanvas 
+                    key={gameSessionId} // Force re-render on restart
                     status={status} 
                     audioBuffer={audioBuffer} 
                     notes={notes} 
@@ -558,13 +617,11 @@ function App() {
             </div>
         )}
 
-        <ResultScreen status={status} score={score} notesCount={notes.length} songName={songName} onReset={backToLibrary} onReplay={() => startCountdown()} />
+        <ResultScreen status={status} score={score} notesCount={notes.length} songName={songName} onReset={backToLibrary} onReplay={restartGame} />
       </main>
 
-      {!isGameActive && status !== GameStatus.Editing && (
-          <footer className="p-4 md:p-6 text-center text-[8px] md:text-[10px] text-gray-700 uppercase tracking-[0.2em] bg-[#030304] shrink-0 border-t border-white/5 select-none" onClick={handleVersionClick}>
-             <p className="flex items-center justify-center gap-2">NeonFlow v2.1 • AI Rhythm Engine {isDebugMode && <span className="text-red-500 font-bold flex items-center gap-1"><Bug className="w-3 h-3"/> DEV MODE</span>}</p>
-          </footer>
+      {status !== GameStatus.Playing && status !== GameStatus.Countdown && status !== GameStatus.Paused && status !== GameStatus.Editing && (
+          <Footer isDebugMode={isDebugMode} onClick={handleVersionClick} />
       )}
     </div>
   );

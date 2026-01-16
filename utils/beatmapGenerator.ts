@@ -1,40 +1,23 @@
-import { Note, NoteLane, Onset, SongStructure, BeatmapDifficulty, LaneCount, PlayStyle } from '../types';
 
+import { Note, NoteLane, Onset, SongStructure, BeatmapDifficulty, LaneCount, PlayStyle, MotionDescriptors, NoteType } from '../types';
+
+// Configuration per difficulty
+// Adjusted minGap to ensure distinct difficulty tiers
 const DIFFICULTY_CONFIG = {
     [BeatmapDifficulty.Easy]: {
-        thresholdMultiplier: 2.0, 
-        minGap: 0.45,
-        streamChance: 0.0, 
-        holdChance: 0.0,
-        jumpChance: 0.0
+        thresholdMultiplier: 2.2, minGap: 0.35, maxPolyphony: 1, allowedCost: 2.0, patternChance: 0.0
     },
     [BeatmapDifficulty.Normal]: {
-        thresholdMultiplier: 1.25, 
-        minGap: 0.22,
-        streamChance: 0.0,
-        holdChance: 0.15,
-        jumpChance: 0.0
+        thresholdMultiplier: 1.5, minGap: 0.20, maxPolyphony: 2, allowedCost: 3.5, patternChance: 0.1
     },
     [BeatmapDifficulty.Hard]: {
-        thresholdMultiplier: 1.0, 
-        minGap: 0.15, 
-        streamChance: 0.2,
-        holdChance: 0.25,
-        jumpChance: 0.15
+        thresholdMultiplier: 1.1, minGap: 0.12, maxPolyphony: 2, allowedCost: 5.0, patternChance: 0.3
     },
     [BeatmapDifficulty.Expert]: {
-        thresholdMultiplier: 0.8, 
-        minGap: 0.08, 
-        streamChance: 0.5,
-        holdChance: 0.3,
-        jumpChance: 0.35
+        thresholdMultiplier: 0.9, minGap: 0.07, maxPolyphony: 3, allowedCost: 8.0, patternChance: 0.5
     },
     [BeatmapDifficulty.Titan]: {
-        thresholdMultiplier: 0.75, 
-        minGap: 0.11,
-        streamChance: 0.6,
-        holdChance: 0.2, 
-        jumpChance: 0.45 
+        thresholdMultiplier: 0.75, minGap: 0.04, maxPolyphony: 4, allowedCost: 12.0, patternChance: 0.8
     }
 };
 
@@ -44,259 +27,457 @@ export interface BeatmapFeatures {
     catch: boolean;
 }
 
-const getNextLanes = (
-    count: number, 
-    lastLanes: number[], 
-    laneCount: number, 
-    style: 'stream' | 'jump' | 'simple'
-): number[] => {
-    const lanes: number[] = [];
-    const allLanes = Array.from({length: laneCount}, (_, i) => i);
+// --- Direction 2: Relative Anchoring (AlignOnsets) ---
+// Groups nearby onsets into rhythmic structures
+const alignOnsetsLocal = (onsets: Onset[], bpm: number): Onset[] => {
+    if (onsets.length < 2) return onsets;
     
-    if (count === 1) {
-        const last = lastLanes[0];
-        if (style === 'stream') {
-            const candidates = allLanes.filter(l => Math.abs(l - last) >= 1 && Math.abs(l - last) <= 2);
-            if (candidates.length > 0) {
-                lanes.push(candidates[Math.floor(Math.random() * candidates.length)]);
-            } else {
-                lanes.push((last + 1) % laneCount);
+    const sorted = [...onsets].sort((a, b) => a.time - b.time);
+    const aligned: Onset[] = [];
+    const groupingThreshold = 0.02; // 20ms tolerance
+
+    let i = 0;
+    while (i < sorted.length) {
+        const group = [sorted[i]];
+        let j = i + 1;
+        
+        while (j < sorted.length) {
+            const delta = sorted[j].time - sorted[j-1].time;
+            
+            // Break if gap is too large (probably a pause in music)
+            if (delta > 1.0) break;
+
+            // Simple pattern matching: is this interval similar to the previous one?
+            if (group.length > 1) {
+                const prevDelta = group[group.length-1].time - group[group.length-2].time;
+                if (Math.abs(delta - prevDelta) < groupingThreshold) {
+                    group.push(sorted[j]);
+                    j++;
+                    continue;
+                }
             }
-        } else {
-            const candidates = allLanes.filter(l => !lastLanes.includes(l));
-            if (candidates.length > 0) {
-                lanes.push(candidates[Math.floor(Math.random() * candidates.length)]);
-            } else {
-                lanes.push(Math.floor(Math.random() * laneCount));
+            
+            // If it's the second note, we accept it tentatively to check for a 3rd
+            if (group.length === 1 && delta < 0.5) {
+                group.push(sorted[j]);
+                j++;
+                continue;
+            }
+
+            break;
+        }
+
+        // Apply alignment if we found a rhythmic group
+        if (group.length >= 3) {
+            let totalDelta = 0;
+            for(let k=1; k<group.length; k++) totalDelta += group[k].time - group[k-1].time;
+            const avgDelta = totalDelta / (group.length - 1);
+            
+            // Re-space
+            const anchorTime = group[0].time;
+            for(let k=0; k<group.length; k++) {
+                group[k].time = anchorTime + (k * avgDelta);
             }
         }
-    } 
-    else {
-        const needed = count;
-        const candidates = allLanes.filter(l => !lastLanes.includes(l));
-        const pool = candidates.length >= needed ? candidates : allLanes;
-        for (let i = pool.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [pool[i], pool[j]] = [pool[j], pool[i]];
-        }
-        lanes.push(...pool.slice(0, needed));
+        
+        aligned.push(...group);
+        i = j;
     }
     
-    return lanes.sort((a,b) => a-b);
+    // Deduplicate very close notes
+    return aligned.filter((o, idx, arr) => idx === 0 || o.time > arr[idx-1].time + 0.005);
 };
 
+// --- Direction 3: Ergonomic Physics Engine 2.0 ---
+class ErgonomicPhysics {
+    private laneCount: number;
+    private bias: 'left_heavy' | 'right_heavy' | 'balanced' | 'alternating';
+    
+    // State tracking
+    private lastLanes: number[] = [2]; // Lanes used in last note
+    private lastTime: number = 0;
+    private lastFlowDirection: number = 0; // -1 (Left), 1 (Right), 0 (Neutral)
+    
+    // Fatigue tracking (Simple model)
+    private leftHandStrain: number = 0;
+    private rightHandStrain: number = 0;
+
+    constructor(laneCount: number) {
+        this.laneCount = laneCount;
+        this.bias = 'balanced';
+    }
+
+    setBias(bias: string) {
+        this.bias = bias as any;
+    }
+
+    private getHand(lane: number): 'LEFT' | 'RIGHT' {
+        const center = this.laneCount / 2;
+        return lane < center ? 'LEFT' : 'RIGHT';
+    }
+
+    // Decay strain over time
+    updateStrain(currentTime: number) {
+        const dt = currentTime - this.lastTime;
+        const decay = Math.max(0, dt * 5.0); // Recover 5 strain per second
+        this.leftHandStrain = Math.max(0, this.leftHandStrain - decay);
+        this.rightHandStrain = Math.max(0, this.rightHandStrain - decay);
+    }
+
+    getCost(targetLanes: number[], currentTime: number, isJackAllowed: boolean): number {
+        this.updateStrain(currentTime);
+        const timeDelta = Math.max(0.01, currentTime - this.lastTime);
+        
+        let cost = 0;
+        
+        // 1. Physical Distance & Flow
+        // Calculate average position of previous chord vs new chord
+        const prevAvg = this.lastLanes.reduce((a,b)=>a+b,0) / this.lastLanes.length;
+        const currAvg = targetLanes.reduce((a,b)=>a+b,0) / targetLanes.length;
+        const movement = currAvg - prevAvg;
+        const dist = Math.abs(movement);
+        
+        cost += dist * 1.5;
+
+        // Flow bonus: If we were moving Right, and keep moving Right, reduce cost
+        if ((this.lastFlowDirection > 0 && movement > 0) || (this.lastFlowDirection < 0 && movement < 0)) {
+            cost -= 1.0; 
+        }
+
+        // 2. Jack Penalty (Same lane hit)
+        let hasJack = false;
+        for (const lane of targetLanes) {
+            if (this.lastLanes.includes(lane)) {
+                hasJack = true;
+                if (timeDelta < 0.15 && !isJackAllowed) return 9999; 
+                cost += (0.3 / timeDelta) * 5; // Fast jacks are expensive
+            }
+        }
+
+        // 3. Hand Strain / Bias
+        let currentLeftLoad = 0;
+        let currentRightLoad = 0;
+        
+        targetLanes.forEach(lane => {
+            if (this.getHand(lane) === 'LEFT') currentLeftLoad++;
+            else currentRightLoad++;
+        });
+
+        // Apply Bias
+        if (this.bias === 'left_heavy' && currentRightLoad > 0) cost += currentRightLoad * 2;
+        if (this.bias === 'right_heavy' && currentLeftLoad > 0) cost += currentLeftLoad * 2;
+        
+        // Apply Alternating Bias (Punish repeating same hand)
+        if (this.bias === 'alternating') {
+            const prevWasLeft = this.lastLanes.some(l => this.getHand(l) === 'LEFT');
+            const prevWasRight = this.lastLanes.some(l => this.getHand(l) === 'RIGHT');
+            
+            // If strictly alternating, punish using same hand again
+            if (prevWasLeft && !prevWasRight && currentLeftLoad > 0) cost += 5;
+            if (prevWasRight && !prevWasLeft && currentRightLoad > 0) cost += 5;
+        }
+
+        // Apply Fatigue
+        if (this.leftHandStrain > 3 && currentLeftLoad > 0) cost += this.leftHandStrain * 2;
+        if (this.rightHandStrain > 3 && currentRightLoad > 0) cost += this.rightHandStrain * 2;
+
+        // 4. Edge Penalty
+        if (targetLanes.includes(0) || targetLanes.includes(this.laneCount-1)) cost += 0.5;
+
+        return cost;
+    }
+
+    commit(lanes: number[], currentTime: number) {
+        const prevAvg = this.lastLanes.reduce((a,b)=>a+b,0) / this.lastLanes.length;
+        const currAvg = lanes.reduce((a,b)=>a+b,0) / lanes.length;
+        const movement = currAvg - prevAvg;
+        
+        if (movement > 0.1) this.lastFlowDirection = 1;
+        else if (movement < -0.1) this.lastFlowDirection = -1;
+        // else maintain flow (or set 0 if holds)
+
+        // Add strain
+        lanes.forEach(lane => {
+            if (this.getHand(lane) === 'LEFT') this.leftHandStrain += 1.0;
+            else this.rightHandStrain += 1.0;
+        });
+
+        this.lastLanes = lanes;
+        this.lastTime = currentTime;
+    }
+
+    getBestLanes(count: number, currentTime: number, maxCost: number, style: 'stream'|'jump'|'simple'): number[] {
+        const allLanes = Array.from({length: this.laneCount}, (_, i) => i);
+        
+        // Helper: Generate combinations
+        const getCombs = (arr: number[], k: number): number[][] => {
+            if (k === 1) return arr.map(val => [val]);
+            const res: number[][] = [];
+            arr.forEach((val, idx) => {
+                const sub = getCombs(arr.slice(idx + 1), k - 1);
+                sub.forEach(s => res.push([val, ...s]));
+            });
+            return res;
+        };
+
+        let candidates = getCombs(allLanes, count);
+
+        let bestCandidate = candidates[0];
+        let minCandidateCost = 99999;
+
+        // Shuffle candidates to avoid constant bias when costs are equal
+        candidates.sort(() => Math.random() - 0.5);
+
+        for (const chord of candidates) {
+            const cost = this.getCost(chord, currentTime, style === 'simple');
+            
+            if (cost < minCandidateCost) {
+                minCandidateCost = cost;
+                bestCandidate = chord;
+            }
+        }
+        
+        this.commit(bestCandidate, currentTime);
+        return bestCandidate;
+    }
+}
+
+// --- Direction 4: Pattern Library ---
+const PatternLibrary = {
+    // Linear Stair: 0, 1, 2, 3
+    getStair: (startTime: number, count: number, interval: number, startLane: number, dir: 1 | -1, laneCount: number) => {
+        const notes: any[] = [];
+        for(let i=0; i<count; i++) {
+            let lane = startLane + (i * dir);
+            if (lane >= laneCount) lane = laneCount - 2; 
+            if (lane < 0) lane = 1;
+            
+            notes.push({ time: startTime + i*interval, lane });
+        }
+        return notes;
+    },
+    // ZigZag / Trill: 1, 2, 1, 2
+    getTrill: (startTime: number, count: number, interval: number, laneA: number, laneB: number) => {
+        const notes: any[] = [];
+        for(let i=0; i<count; i++) {
+            notes.push({ time: startTime + i*interval, lane: i % 2 === 0 ? laneA : laneB });
+        }
+        return notes;
+    },
+    // Circular / Roll (Specifically for 4K/6K)
+    getRoll: (startTime: number, count: number, interval: number, laneCount: number) => {
+        const notes: any[] = [];
+        // 0-1-2-3-2-1...
+        const cycle = laneCount === 4 ? [0,1,2,3,2,1] : [0,1,2,3,4,5,4,3,2,1];
+        for(let i=0; i<count; i++) {
+            notes.push({ time: startTime + i*interval, lane: cycle[i % cycle.length] });
+        }
+        return notes;
+    }
+};
+
+// --- Main Generator ---
 
 export const generateBeatmap = (
-    onsets: Onset[], 
+    rawOnsets: Onset[], 
     structure: SongStructure, 
     difficulty: BeatmapDifficulty = BeatmapDifficulty.Normal,
     laneCount: LaneCount = 4,
     playStyle: PlayStyle = 'THUMB',
     features: BeatmapFeatures = { normal: true, holds: true, catch: true }
 ): Note[] => {
-    let notes: Note[] = [];
-    const effectiveLaneCount = difficulty === BeatmapDifficulty.Titan ? 6 : laneCount;
-    const effectivePlayStyle = difficulty === BeatmapDifficulty.Titan ? 'MULTI' : playStyle;
-
-    let sortedOnsets = onsets.sort((a, b) => a.time - b.time);
+    
+    const onsets = alignOnsetsLocal(rawOnsets, structure.bpm);
     const config = DIFFICULTY_CONFIG[difficulty];
+    const physics = new ErgonomicPhysics(laneCount);
 
-    notes = runGenerationPass(sortedOnsets, structure, config, effectiveLaneCount, effectivePlayStyle, difficulty, features);
+    let notes: Note[] = [];
+    let noteIndex = 0;
+    let lastGeneratedTime = -10.0; // Ensure first note generates
 
-    if (notes.length < 30 && difficulty !== BeatmapDifficulty.Easy) {
-        const retryConfig = { ...config, thresholdMultiplier: config.thresholdMultiplier * 0.7 };
-        notes = runGenerationPass(sortedOnsets, structure, retryConfig, effectiveLaneCount, effectivePlayStyle, difficulty, features);
-    }
-    
-    if (notes.length === 0 && sortedOnsets.length > 0) {
-        return generateRawFallback(sortedOnsets, effectiveLaneCount);
-    }
-
-    return notes;
-};
-
-const runGenerationPass = (
-    onsets: Onset[], 
-    structure: SongStructure, 
-    config: any,
-    laneCount: LaneCount,
-    playStyle: PlayStyle,
-    difficulty: BeatmapDifficulty,
-    features: BeatmapFeatures
-): Note[] => {
-    const notes: Note[] = [];
-    let lastLanes: number[] = [Math.floor(laneCount / 2)];
-    let lastTime = -10;
-    
-    let lastNoteWasCatch = false;
-
-    onsets.forEach(onset => {
+    while (noteIndex < onsets.length) {
+        const onset = onsets[noteIndex];
+        
+        // 1. Get Context
         const currentSection = structure.sections.find(
             s => onset.time >= s.startTime && onset.time < s.endTime
-        ) || structure.sections[structure.sections.length - 1];
-
-        const baseThreshold = 0.05 + (1.0 - currentSection.intensity) * 0.25;
-        let dynamicThreshold = baseThreshold * config.thresholdMultiplier;
-
-        if (currentSection.style === 'simple') dynamicThreshold *= 1.3;
+        ) || structure.sections[0];
         
-        // Catch Chain Logic: Allow extremely small gaps for catch streams (1/16th)
-        const minGap = lastNoteWasCatch ? config.minGap * 0.5 : config.minGap;
+        const desc = currentSection.descriptors || { flow: 'random', hand_bias: 'balanced', focus: 'melody' };
+        
+        physics.setBias(desc.hand_bias);
 
-        if (onset.energy < dynamicThreshold) return;
-        if (onset.time - lastTime < minGap) return;
+        // 2. Threshold Check (Energy)
+        const baseThreshold = 0.05 + (1.0 - currentSection.intensity) * 0.2;
+        const dynThreshold = baseThreshold * config.thresholdMultiplier;
+        
+        if (onset.energy < dynThreshold) {
+            noteIndex++;
+            continue;
+        }
 
+        // 3. Speed Limit Check (Difficulty Gap)
+        // CRITICAL FIX: Ensure notes aren't too dense for low difficulties
+        if (onset.time - lastGeneratedTime < config.minGap) {
+            noteIndex++;
+            continue;
+        }
+
+        // 4. Pattern Injection
+        // We look ahead to see if we can fit a pattern
+        const lookAhead = 3; 
+        const canPattern = 
+            features.normal &&
+            Math.random() < config.patternChance &&
+            noteIndex + lookAhead < onsets.length;
+
+        if (canPattern) {
+            const nextOnset = onsets[noteIndex+1];
+            const interval = nextOnset.time - onset.time;
+            
+            // Only inject pattern if notes are dense enough to warrant a stream pattern
+            // And if the interval respects the difficulty gap (roughly)
+            if (interval < 0.4 && interval >= config.minGap * 0.8) {
+                let generatedPattern: any[] = [];
+                let notesConsumed = 0;
+
+                if (desc.flow === 'linear') {
+                    // Stair
+                    const dir = Math.random() > 0.5 ? 1 : -1;
+                    const startL = dir === 1 ? 0 : laneCount - 1;
+                    const len = Math.min(4, onsets.length - noteIndex);
+                    generatedPattern = PatternLibrary.getStair(onset.time, len, interval, startL, dir, laneCount);
+                    notesConsumed = len;
+                } 
+                else if (desc.flow === 'zigzag' || desc.flow === 'random') {
+                    // Trill
+                    const len = Math.min(4, onsets.length - noteIndex);
+                    const l1 = Math.floor(Math.random() * laneCount);
+                    let l2 = Math.floor(Math.random() * laneCount);
+                    while(l2 === l1 || Math.abs(l2-l1) > 2) l2 = Math.floor(Math.random() * laneCount);
+                    generatedPattern = PatternLibrary.getTrill(onset.time, len, interval, l1, l2);
+                    notesConsumed = len;
+                }
+                else if (desc.flow === 'circular') {
+                    // Roll
+                    const len = Math.min(6, onsets.length - noteIndex);
+                    generatedPattern = PatternLibrary.getRoll(onset.time, len, interval, laneCount);
+                    notesConsumed = len;
+                }
+
+                if (generatedPattern.length > 0) {
+                    generatedPattern.forEach(p => {
+                        physics.commit([p.lane], p.time); 
+                        notes.push(createNote(p.time, p.lane, 0, 'NORMAL'));
+                        lastGeneratedTime = p.time;
+                    });
+                    
+                    noteIndex += notesConsumed; 
+                    continue;
+                }
+            }
+        }
+
+        // 5. Standard Note Generation
         let simNotes = 1;
-        const isTitan = difficulty === BeatmapDifficulty.Titan;
         
-        // JUMP LOGIC: Now intrinsic to difficulty (not toggled by feature flag)
-        const allowJump = (currentSection.style === 'jump' || Math.random() < config.jumpChance) && currentSection.intensity > 0.6;
-        
-        if (allowJump && onset.energy > 0.75) {
-            simNotes = 2;
-            if ((isTitan || (playStyle === 'MULTI' && laneCount === 6)) && onset.energy > 0.92) {
-                    if (isTitan && Math.random() > 0.65) {
-                        simNotes = 3; 
-                        if (onset.energy > 0.99) simNotes = 4; 
-                    } else if (config.jumpChance > 0.35) {
-                        simNotes = 3;
-                    }
-            }
+        // Double/Triple logic
+        if (config.maxPolyphony > 1) {
+            const isHeavyHit = onset.energy > 0.9 && onset.isLowFreq;
+            if (isHeavyHit || (desc.focus === 'drum' && onset.energy > 0.8)) simNotes = 2;
+            if (difficulty === BeatmapDifficulty.Titan && onset.energy > 0.95) simNotes = 3;
         }
         
-        if (playStyle === 'THUMB' && !isTitan) {
-            simNotes = Math.min(simNotes, 2);
-        }
+        if (playStyle === 'THUMB' && difficulty !== BeatmapDifficulty.Titan) simNotes = Math.min(simNotes, 2);
 
-        const lanes = getNextLanes(simNotes, lastLanes, laneCount, currentSection.style as any);
+        const lanes = physics.getBestLanes(simNotes, onset.time, config.allowedCost, currentSection.style as any);
 
-        // HOLD LOGIC
-        let isHold = false;
-        let duration = 0;
+        // 6. Note Type (Hold/Catch)
+        let nextNoteTime = 9999;
+        if (noteIndex + 1 < onsets.length) nextNoteTime = onsets[noteIndex+1].time;
         
-        // Only consider creating a hold if the feature is enabled, but we do the filtering at the push step
-        if (currentSection.style === 'hold' && Math.random() < config.holdChance && simNotes === 1) {
-            isHold = true;
-            const maxHold = config.minGap > 0.2 ? 0.5 : 1.0;
-            duration = Math.min(maxHold, Math.max(0.1, 60 / structure.bpm)); 
-        }
+        lanes.forEach(lane => {
+            let type: NoteType = 'NORMAL';
+            let duration = 0;
 
-        // CATCH LOGIC
-        // Check if environment is suitable for Catch
-        const canCatch = !isHold && (currentSection.style === 'stream' || onset.energy > 0.8 || lastNoteWasCatch);
-        
-        lanes.forEach((lane, index) => {
-            let type: 'NORMAL' | 'CATCH' = 'NORMAL';
-
-            if (canCatch) {
-                let catchProb = 0.1;
-
-                // 1. High Energy / Kiai Section
-                if (currentSection.style === 'stream' && currentSection.intensity > 0.7) catchProb = 0.3;
+            // Hold Logic
+            const canHold = features.holds && desc.focus === 'vocal' && (currentSection.style === 'hold' || currentSection.style === 'simple');
+            
+            if (canHold && lanes.length === 1) {
+                const maxDur = nextNoteTime - onset.time - 0.1;
+                const idealDur = Math.min(0.5, 60/structure.bpm);
                 
-                // 2. Chain Logic (If previous was catch, boost prob to create slider feel)
-                if (lastNoteWasCatch) {
-                    if (onset.time - lastTime < 0.2) {
-                         catchProb = 0.85; // High chance to continue chain
-                    } else {
-                         catchProb = 0.2; // Break chain if slow
-                    }
-                }
-
-                // 3. Mixed Chords (Titan/Expert): Allow one note in a chord to be catch
-                if (simNotes > 1 && isTitan) {
-                     // Only make one of them catch usually
-                     if (index === 0 && Math.random() < 0.4) {
-                         type = 'CATCH';
-                     }
-                } else if (simNotes === 1) {
-                    if (Math.random() < catchProb) {
-                        type = 'CATCH';
-                    }
+                if (maxDur > 0.2) { 
+                    duration = Math.min(maxDur, idealDur);
                 }
             }
 
-            // FILTER LOGIC: Check features before pushing
-            let shouldPush = false;
-
-            if (type === 'CATCH') {
-                if (features.catch) shouldPush = true;
-            } else if (isHold) {
-                if (features.holds) shouldPush = true;
-            } else {
-                // Standard Normal Note
-                if (features.normal) shouldPush = true;
+            // Catch Logic
+            if (features.catch && duration === 0) {
+                if (desc.flow === 'circular' || (onset.energy > 0.8 && lanes.length === 1)) {
+                    if (Math.random() < 0.25) type = 'CATCH';
+                }
             }
 
-            if (shouldPush) {
-                notes.push({
-                    id: `note-${onset.time}-${lane}`,
-                    time: onset.time,
-                    lane: lane as NoteLane,
-                    hit: false,
-                    visible: true,
-                    duration: isHold ? duration : 0,
-                    isHolding: false,
-                    type: type
-                });
-            }
+            notes.push(createNote(onset.time, lane, duration, type));
         });
 
-        // Determine if this set contained a catch note for next iteration context
-        // Only count it if we actually pushed it
-        const pushedNotes = notes.filter(n => n.time === onset.time);
-        const hasCatch = pushedNotes.some(n => n.type === 'CATCH');
-
-        lastLanes = lanes;
-        lastTime = onset.time + (isHold ? duration : 0);
-        lastNoteWasCatch = hasCatch; 
-    });
+        lastGeneratedTime = onset.time;
+        noteIndex++;
+    }
 
     return notes;
 };
 
-const generateRawFallback = (onsets: Onset[], laneCount: number): Note[] => {
-    return onsets
-        .filter(o => o.energy > 0.1)
-        .map((o, idx) => ({
-            id: `fallback-${idx}`,
-            time: o.time,
-            lane: (idx % laneCount) as NoteLane,
-            hit: false,
-            visible: true,
-            duration: 0,
-            isHolding: false,
-            type: 'NORMAL'
-        }));
-};
+// Helper
+const createNote = (time: number, lane: number, duration: number, type: NoteType): Note => ({
+    id: `note-${time.toFixed(3)}-${lane}`,
+    time,
+    lane: lane as NoteLane,
+    hit: false,
+    visible: true,
+    duration,
+    isHolding: false,
+    type
+});
 
 export const calculateDifficultyRating = (notes: Note[], duration: number): number => {
     if (notes.length === 0 || duration === 0) return 0;
-    const avgNps = notes.length / duration;
-    let maxWindowNotes = 0;
-    const sortedNotes = notes.sort((a, b) => a.time - b.time);
-    
-    if (sortedNotes.length > 0) {
-        let left = 0;
-        for (let right = 0; right < sortedNotes.length; right++) {
-            while (sortedNotes[right].time - sortedNotes[left].time > 1.0) {
-                left++;
-            }
-            const currentCount = right - left + 1;
-            if (currentCount > maxWindowNotes) {
-                maxWindowNotes = currentCount;
-            }
+    const sortedNotes = [...notes].sort((a, b) => a.time - b.time);
+    const SECTION_LENGTH = 0.4;
+    const sections: number[] = [];
+    let currentSectionStrain = 0;
+    let currentSectionStart = 0;
+    let previousNoteTime = 0;
+    let previousNoteLane = -1;
+
+    for (let i = 0; i < sortedNotes.length; i++) {
+        const note = sortedNotes[i];
+        while (note.time > currentSectionStart + SECTION_LENGTH) {
+            sections.push(currentSectionStrain);
+            currentSectionStrain = 0; 
+            currentSectionStart += SECTION_LENGTH;
         }
+        const timeDelta = Math.max(note.time - previousNoteTime, 0.05);
+        let strain = 1 / timeDelta;
+        
+        // Jack strain
+        if (note.lane === previousNoteLane) strain *= 1.5;
+        
+        currentSectionStrain += strain;
+        previousNoteTime = note.time;
+        previousNoteLane = note.lane;
     }
-    const peakNps = maxWindowNotes; 
-    const weightedAvg = avgNps * 1.5; 
-    const weightedPeak = peakNps * 0.1;
-    let rawScore = weightedAvg + weightedPeak;
-    
-    if (rawScore > 12) {
-        const excess = rawScore - 12;
-        rawScore = 12 + Math.pow(excess, 0.75); 
+    sections.push(currentSectionStrain);
+    sections.sort((a, b) => b - a);
+    let diff = 0;
+    let weight = 1.0;
+    const topSections = Math.min(sections.length, 30); 
+    for (let i = 0; i < topSections; i++) {
+        diff += sections[i] * weight;
+        weight *= 0.9;
     }
     
-    return Math.max(1, parseFloat(rawScore.toFixed(1)));
+    // RETURN RAW VALUE FOR PRECISION (Do not round)
+    return Math.max(1, Math.sqrt(diff * 0.03) * 2.1);
 };
