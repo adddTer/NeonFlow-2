@@ -28,6 +28,34 @@ const calculateMovingAverage = (data: number[], windowSize: number) => {
 };
 
 /**
+ * Helper: Extract a slice of an AudioBuffer
+ */
+export const getAudioBufferSlice = (buffer: AudioBuffer, startTime: number, duration: number): AudioBuffer => {
+    const AudioContextClass = (window.AudioContext || (window as any).webkitAudioContext);
+    const ctx = new AudioContextClass(); // Dummy context to create buffer
+    
+    const sr = buffer.sampleRate;
+    const startSample = Math.floor(Math.max(0, startTime) * sr);
+    const endSample = Math.floor(Math.min(buffer.duration, startTime + duration) * sr);
+    const length = endSample - startSample;
+    
+    if (length <= 0) {
+        return ctx.createBuffer(buffer.numberOfChannels, 1, sr);
+    }
+
+    const newBuffer = ctx.createBuffer(buffer.numberOfChannels, length, sr);
+    
+    for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+        const oldData = buffer.getChannelData(channel);
+        const newData = newBuffer.getChannelData(channel);
+        // Optimized copy
+        newData.set(oldData.subarray(startSample, endSample));
+    }
+    
+    return newBuffer;
+};
+
+/**
  * 1. 预处理音频 (Main Thread)
  * 使用 OfflineAudioContext 快速提取低频通道数据。
  * 这部分必须在主线程运行，因为它依赖 DOM Audio API。

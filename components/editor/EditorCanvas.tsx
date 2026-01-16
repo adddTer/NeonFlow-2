@@ -25,13 +25,16 @@ interface EditorCanvasProps {
     // Live Recording
     activeRecordingLanes?: { [key: number]: number };
     recordSnap?: boolean;
+
+    // AI Visuals
+    aiRegion?: { start: number, end: number }; // Time range to highlight
 }
 
 export const EditorCanvas: React.FC<EditorCanvasProps> = ({
     notes, currentTime, duration, laneCount, theme, bpm, snapDivisor, zoomLevel,
     activeTool, selectedNoteIds,
     onSeek, onAddNote, onNoteClick, onNoteRightClick, getSnapTime,
-    activeRecordingLanes, recordSnap
+    activeRecordingLanes, recordSnap, aiRegion
 }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -223,6 +226,30 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
             if (isMeasure) { ctx.fillStyle = '#888'; ctx.fillText(t.toFixed(1) + 's', startX - 10, y + 3); }
         }
 
+        // 2.5 AI Context Region Highlight
+        if (aiRegion) {
+            const regionYEnd = timeToY(aiRegion.start); 
+            const regionYStart = timeToY(aiRegion.end);
+            // Note: time flows Up. Start time is lower Y (bottom), End time is higher Y (top).
+            // But Y coord decreases as we go up.
+            // So startY (visually lower) > endY (visually higher).
+            
+            const regionH = regionYEnd - regionYStart;
+            
+            ctx.fillStyle = 'rgba(189, 0, 255, 0.1)'; // Neon Purple tint
+            ctx.fillRect(startX, regionYStart, TRACK_WIDTH, regionH);
+            
+            ctx.strokeStyle = 'rgba(189, 0, 255, 0.5)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(startX, regionYStart, TRACK_WIDTH, regionH);
+            
+            // Draw Label
+            ctx.fillStyle = '#bd00ff';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText("AI 视窗", startX + TRACK_WIDTH + 10, regionYEnd - 5);
+        }
+
         // 3. Notes
         const renderNoteObj = (note: Note, isSelected: boolean, isGhost: boolean = false) => {
             const headY = timeToY(note.time);
@@ -331,7 +358,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
         ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = '#ff0044'; ctx.textAlign = 'right';
         ctx.fillText("判定线", startX - 25, HIT_LINE_Y + 4);
 
-    }, [notes, currentTime, canvasHeight, canvasWidth, laneCount, theme, bpm, snapDivisor, zoomLevel, selectedNoteIds, dragState, activeRecordingLanes]);
+    }, [notes, currentTime, canvasHeight, canvasWidth, laneCount, theme, bpm, snapDivisor, zoomLevel, selectedNoteIds, dragState, activeRecordingLanes, aiRegion]);
 
     return (
         <div ref={containerRef} className="w-full h-full bg-[#050505] relative overflow-hidden cursor-crosshair">

@@ -164,6 +164,46 @@ export const useChartEditor = ({
         setHasUnsavedChanges(true);
     };
 
+    const bulkAddNotes = (newNotesData: { time: number, lane: number, duration: number }[]) => {
+        const addedNotes: Note[] = newNotesData.map(d => ({
+            id: crypto.randomUUID(),
+            time: d.time,
+            lane: d.lane as NoteLane,
+            type: 'NORMAL',
+            duration: d.duration,
+            hit: false,
+            visible: true,
+            isHolding: false
+        }));
+
+        // Merge and sort
+        const combined = [...notes, ...addedNotes].sort((a, b) => a.time - b.time);
+        setNotes(combined);
+        setHasUnsavedChanges(true);
+        // Optionally select the newly added notes
+        setSelectedNoteIds(new Set(addedNotes.map(n => n.id)));
+    };
+
+    const deleteNotesInRange = (start: number, end: number, targetLanes?: number[]) => {
+        const hasLaneFilter = targetLanes && targetLanes.length > 0;
+        
+        setNotes(prev => prev.filter(n => {
+            // Check if note is within the time range
+            if (n.time >= start && n.time <= end) {
+                // If specific lanes are targeted, only delete those lanes
+                if (hasLaneFilter) {
+                    return !targetLanes.includes(n.lane); 
+                }
+                // If no lane filter, delete everything in time range
+                return false; 
+            }
+            // Keep notes outside time range
+            return true;
+        }));
+        
+        setHasUnsavedChanges(true);
+    };
+
     const deleteSelected = () => {
         if (selectedNoteIds.size === 0) return;
         setNotes(prev => prev.filter(n => !selectedNoteIds.has(n.id)));
@@ -221,6 +261,8 @@ export const useChartEditor = ({
         togglePlay,
         seek,
         addNote,
+        bulkAddNotes,
+        deleteNotesInRange, 
         deleteNote,
         updateNote,
         deleteSelected,

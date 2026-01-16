@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { SongStructure, AITheme, DEFAULT_THEME } from "../types";
+import { SongStructure, AITheme, DEFAULT_THEME, NoteLane } from "../types";
 
 const getEffectiveKey = (userKey?: string) => {
   if (userKey && userKey.trim().length > 0) {
@@ -222,4 +222,130 @@ export const analyzeStructureWithGemini = async (
   }
   
   return { structure: defaultStructure, theme: finalTheme, metadata: finalMetadata };
+};
+
+/**
+ * Editor AI Copilot: Generate patterns based on user prompt with Audio Context
+ */
+export const generatePatternWithGemini = async (
+    prompt: string,
+    params: {
+        bpm: number;
+        laneCount: number;
+        beatCount: number; // Length of pattern in beats
+    },
+    context: {
+        audioBase64?: string; // Short snippet (~5-10s)
+        precedingNotes?: { lane: number, timeDiff: number }[]; // Notes just before cursor
+        existingNotesInWindow?: { lane: number, beatOffset: number }[]; // EXISTING NOTES IN TARGET AREA
+    },
+    userApiKey?: string
+): Promise<{ 
+    instructions: {
+        type: 'CLEAR' | 'ADD';
+        lanes?: number[]; // For CLEAR (empty = all)
+        notes?: { beatOffset: number, lane: number, duration: number }[]; // For ADD
+    }[]
+}> => {
+    const apiKey = getEffectiveKey(userApiKey);
+    if (!apiKey) throw new Error("API Key Missing");
+
+    const ai = new GoogleGenAI({ apiKey });
+
+    const systemInstruction = `
+        You are an AI Assistant for a Rhythm Game Beatmap Editor.
+        Your task is to interpret the user's natural language command and generate a SEQUENCE of edit instructions.
+        
+        CONTEXT:
+        - Mode: ${params.laneCount}K (Lanes 0 to ${params.laneCount - 1})
+        - BPM: ${params.bpm}
+        - Target Range: ${params.beatCount} beats.
+        
+        INPUT DATA:
+        - Audio Snippet: Starts at cursor (Beat 0). Align to transients.
+        - Existing Notes: Provided in 'existingNotesInWindow'.
+        
+        INSTRUCTIONS LOGIC:
+        - You can return multiple instructions to be executed in order.
+        - **IMPORTANT**: If the user asks to "replace", "change", "overwrite", or "fix" something, you **MUST** issue a 'CLEAR' instruction first for the relevant lanes/area, followed by an 'ADD' instruction.
+        - If the user asks to "add" or "layer" without removing, just use 'ADD'.
+        - If the user asks to "delete" or "clear", just use 'CLEAR'.
+        
+        EXISTING NOTES IN TARGET AREA:
+        ${context.existingNotesInWindow && context.existingNotesInWindow.length > 0 
+            ? JSON.stringify(context.existingNotesInWindow) 
+            : "No notes currently in this area."}
+
+        OUTPUT FORMAT (JSON):
+        {
+            "instructions": [
+                {
+                    "type": "CLEAR",
+                    "lanes": [0, 1] // Optional. If omitted/empty, clears ALL lanes in the time window.
+                },
+                {
+                    "type": "ADD",
+                    "notes": [ { "beatOffset": 0.0, "lane": 0, "duration": 0 } ]
+                }
+            ]
+        }
+    `;
+
+    const contents: any[] = [];
+    
+    if (context.audioBase64) {
+        contents.push({
+            inlineData: { mimeType: 'audio/wav', data: context.audioBase64 }
+        });
+    }
+    
+    contents.push({ text: `User Prompt: "${prompt}"` });
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: { parts: contents },
+        config: {
+            systemInstruction: systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    instructions: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                type: { type: Type.STRING, enum: ['CLEAR', 'ADD'] },
+                                lanes: { 
+                                    type: Type.ARRAY, 
+                                    items: { type: Type.INTEGER },
+                                    description: "For CLEAR: Specific lanes to clear. Empty = All."
+                                },
+                                notes: {
+                                    type: Type.ARRAY,
+                                    items: {
+                                        type: Type.OBJECT,
+                                        properties: {
+                                            beatOffset: { type: Type.NUMBER },
+                                            lane: { type: Type.INTEGER },
+                                            duration: { type: Type.NUMBER }
+                                        },
+                                        required: ['beatOffset', 'lane', 'duration']
+                                    },
+                                    description: "For ADD: List of notes to add."
+                                }
+                            },
+                            required: ['type']
+                        }
+                    }
+                },
+                required: ['instructions']
+            }
+        }
+    });
+
+    if (response.text) {
+        return JSON.parse(response.text);
+    }
+    return { instructions: [] };
 };
