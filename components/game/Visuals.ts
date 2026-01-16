@@ -1,14 +1,18 @@
 
 export class Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  life: number;
-  color: string;
-  size: number;
+  x: number = 0;
+  y: number = 0;
+  vx: number = 0;
+  vy: number = 0;
+  life: number = 0;
+  color: string = '#fff';
+  size: number = 0;
 
-  constructor(x: number, y: number, color: string) {
+  constructor() {
+      // Empty for pooling
+  }
+
+  reset(x: number, y: number, color: string) {
     this.x = x;
     this.y = y;
     // Fast pseudo-random spread
@@ -43,11 +47,23 @@ export class Particle {
   }
 }
 
-export interface GhostNote {
-    lane: number;
-    timeDiff: number; 
-    life: number;
+export class GhostNoteObj {
+    lane: number = 0;
+    timeDiff: number = 0;
+    life: number = 0;
+
+    constructor() {}
+
+    reset(lane: number, timeDiff: number, life: number) {
+        this.lane = lane;
+        this.timeDiff = timeDiff;
+        this.life = life;
+    }
 }
+
+// Renaming to avoid conflict if necessary, but GameCanvas imports GhostNote. 
+// We can alias it.
+export type GhostNote = GhostNoteObj; 
 
 export interface HitEffect {
     id: number;
@@ -56,4 +72,25 @@ export interface HitEffect {
     lane: number;
     color: string;
     scale: number;
+}
+
+export class ObjectPool<T> {
+    private pool: T[] = [];
+    private createFn: () => T;
+
+    constructor(createFn: () => T, initialSize: number = 50) {
+        this.createFn = createFn;
+        for(let i=0; i<initialSize; i++) {
+            this.pool.push(this.createFn());
+        }
+    }
+
+    get(): T {
+        const item = this.pool.pop();
+        return item || this.createFn();
+    }
+
+    release(item: T) {
+        this.pool.push(item);
+    }
 }

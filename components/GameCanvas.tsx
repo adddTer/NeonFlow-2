@@ -2,7 +2,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Note, ScoreState, GameStatus, AITheme, LaneCount, NoteLane, SongStructure, GameModifier } from '../types';
 import { useSoundSystem } from '../hooks/useSoundSystem';
-import { Particle, GhostNote, HitEffect } from './game/Visuals';
+import { Particle, GhostNote, HitEffect, ObjectPool, GhostNoteObj } from './game/Visuals';
 import { useGameInput } from './game/useGameInput';
 
 interface GameCanvasProps {
@@ -46,6 +46,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
   const startTimeRef = useRef<number>(0);
   
+  // Offscreen Canvas for Static Elements
+  const staticCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const layoutDirtyRef = useRef<boolean>(true);
+
   const sizeRef = useRef({ width: 0, height: 0, dpr: 1 });
   const isMobileRef = useRef(false);
 
@@ -55,8 +59,15 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const laneMissStateRef = useRef<number[]>([]); 
   const laneHitStateRef = useRef<number[]>([]); 
   const effectRef = useRef<HitEffect[]>([]);
+  
+  // Object Pools
   const particlesRef = useRef<Particle[]>([]);
-  const ghostNotesRef = useRef<GhostNote[]>([]); 
+  const ghostNotesRef = useRef<GhostNoteObj[]>([]); 
+  
+  // Initialize pools once
+  const particlePoolRef = useRef<ObjectPool<Particle>>(new ObjectPool(() => new Particle(), 100));
+  const ghostNotePoolRef = useRef<ObjectPool<GhostNoteObj>>(new ObjectPool(() => new GhostNoteObj(), 50));
+
   const comboScaleRef = useRef<number>(1.0);
   const hasEndedRef = useRef(false);
   
@@ -66,6 +77,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const isSuddenDeathRef = useRef<boolean>(false);
   const isHiddenRef = useRef<boolean>(false);
   const isFlashlightRef = useRef<boolean>(false);
+  const isPerformanceRef = useRef<boolean>(false); 
 
   const smoothedIntensityRef = useRef<number>(0);
 
@@ -76,6 +88,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const startXRef = useRef<number>(0);
   const pixelsPerSecondRef = useRef<number>(800);
   const activeTouchesRef = useRef<Map<number, number>>(new Map()); 
+  
+  // Performance Stats Refs
+  const fpsRef = useRef(0);
+  const frameCountRef = useRef(0);
+  const lastFpsTimeRef = useRef(0);
+  const lastFrameTimeRef = useRef(0);
 
   const { playHitSound } = useSoundSystem();
 
@@ -91,6 +109,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       isSuddenDeathRef.current = modifiers.includes(GameModifier.SuddenDeath);
       isHiddenRef.current = modifiers.includes(GameModifier.Hidden);
       isFlashlightRef.current = modifiers.includes(GameModifier.Flashlight);
+      isPerformanceRef.current = modifiers.includes(GameModifier.Performance);
   }, [modifiers]);
 
   const getCurrentGameTime = () => {
@@ -140,7 +159,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       triggerHitVisuals(lane, type);
 
       if (hideNotes) {
-          ghostNotesRef.current.push({ lane: lane, timeDiff: hitNote.time - gameTime, life: 1.0 });
+          const g = ghostNotePoolRef.current.get();
+          g.reset(lane, hitNote.time - gameTime, 1.0);
+          ghostNotesRef.current.push(g);
       }
 
       hitNote.hit = true;
@@ -174,6 +195,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       keyStateRef.current = new Array(count).fill(false);
       laneMissStateRef.current = new Array(count).fill(0);
       laneHitStateRef.current = new Array(count).fill(0);
+      
+      // Layout might need update if lane count changed
+      if (sizeRef.current.width > 0) {
+          layoutDirtyRef.current = true;
+          // Re-calc specific lane params immediately for input handlers
+          const { width } = sizeRef.current;
+          const laneW = Math.min(BASE_TARGET_WIDTH, width / count);
+          laneWidthRef.current = laneW;
+          startXRef.current = (width - (laneW * count)) / 2;
+      }
   }, [notes, keyBindings]);
 
   useEffect(() => {
@@ -193,6 +224,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
           dpr: Math.min(window.devicePixelRatio || 1, 2) 
       };
       isMobileRef.current = w < 768;
+      
+      // Mark for redraw
+      layoutDirtyRef.current = true;
   };
 
   useEffect(() => {
@@ -206,6 +240,43 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       resizeObserver.observe(containerRef.current);
       return () => resizeObserver.disconnect();
   }, []);
+
+  // --- Offscreen Buffering Logic ---
+  const updateStaticLayer = () => {
+      if (!staticCanvasRef.current) staticCanvasRef.current = document.createElement('canvas');
+      const cvs = staticCanvasRef.current;
+      const { width, height, dpr } = sizeRef.current;
+      
+      if (cvs.width !== Math.floor(width * dpr) || cvs.height !== Math.floor(height * dpr)) {
+          cvs.width = Math.floor(width * dpr);
+          cvs.height = Math.floor(height * dpr);
+      }
+      
+      const ctx = cvs.getContext('2d', { alpha: true });
+      if (!ctx) return;
+      
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+      
+      const count = laneCountRef.current;
+      const laneW = laneWidthRef.current;
+      const startX = startXRef.current;
+      
+      // Draw Lane Background
+      ctx.fillStyle = 'rgba(15, 20, 25, 0.7)'; 
+      ctx.fillRect(startX, 0, count * laneW, height);
+
+      // Draw Dividers
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+      for (let i = 1; i < count; i++) {
+          ctx.fillRect(startX + i * laneW - 0.5, 0, 1, height);
+      }
+      
+      // Draw Borders
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+      ctx.fillRect(startX - 1, 0, 1, height);
+      ctx.fillRect(startX + count * laneW, 0, 1, height);
+  };
 
   const playMusic = (offset: number = 0) => {
     if (!audioBuffer) return;
@@ -243,7 +314,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     if (status === GameStatus.Playing && !audioContextRef.current) {
       notesRef.current = JSON.parse(JSON.stringify(notes));
       scoreRef.current = { score: 0, combo: 0, maxCombo: 0, perfect: 0, good: 0, miss: 0, hitHistory: [], modifiers };
-      effectRef.current = []; particlesRef.current = []; ghostNotesRef.current = []; comboScaleRef.current = 1.0;
+      
+      // Reset Pools
+      effectRef.current = []; 
+      
+      // Recycle existing active particles back to pool before clearing
+      particlesRef.current.forEach(p => particlePoolRef.current.release(p));
+      particlesRef.current = []; 
+      
+      ghostNotesRef.current.forEach(g => ghostNotePoolRef.current.release(g));
+      ghostNotesRef.current = [];
+      
+      comboScaleRef.current = 1.0;
       keyStateRef.current = new Array(laneCountRef.current).fill(false); 
       activeTouchesRef.current.clear();
       hasEndedRef.current = false;
@@ -279,9 +361,62 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       const hitColor = isPerfect ? theme.perfectColor : theme.goodColor;
       
       const pCount = isMobileRef.current ? (isPerfect ? 10 : 6) : (isPerfect ? 20 : 12);
-      for (let i = 0; i < pCount; i++) particlesRef.current.push(new Particle(laneX, hitY, hitColor));
+      for (let i = 0; i < pCount; i++) {
+          const p = particlePoolRef.current.get();
+          p.reset(laneX, hitY, hitColor);
+          particlesRef.current.push(p);
+      }
       
       effectRef.current.push({ id: Math.random(), text: type, time: performance.now(), lane: lane, color: hitColor, scale: 1.4 });
+  };
+
+  const drawSystemStats = (ctx: CanvasRenderingContext2D, width: number, height: number, now: number) => {
+      if (!isPerformanceRef.current) return;
+
+      // FPS Logic
+      frameCountRef.current++;
+      if (now - lastFpsTimeRef.current >= 1000) {
+          fpsRef.current = frameCountRef.current;
+          frameCountRef.current = 0;
+          lastFpsTimeRef.current = now;
+      }
+      
+      const frameTime = now - lastFrameTimeRef.current;
+      
+      // Draw Box
+      const p = 10;
+      const boxW = 140;
+      const boxH = 90;
+      
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform for HUD
+      ctx.fillStyle = 'rgba(0,0,0,0.8)';
+      ctx.fillRect(p, p, boxW, boxH);
+      ctx.strokeStyle = theme.primaryColor;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(p, p, boxW, boxH);
+      
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = theme.primaryColor;
+      
+      ctx.fillText(`FPS: ${fpsRef.current}`, p + 10, p + 10);
+      ctx.fillText(`Frame Time: ${frameTime.toFixed(2)}ms`, p + 10, p + 25);
+      
+      ctx.fillStyle = '#fff';
+      ctx.fillText(`Entities: ${particlesRef.current.length + ghostNotesRef.current.length}`, p + 10, p + 45);
+      ctx.fillText(`Visible Notes: ${notesRef.current.filter(n => n.visible).length}`, p + 10, p + 60);
+      
+      // Memory (if available in Chrome)
+      const mem = (performance as any).memory;
+      if (mem) {
+          const used = (mem.usedJSHeapSize / 1024 / 1024).toFixed(1);
+          ctx.fillStyle = '#aaa';
+          ctx.fillText(`Mem: ${used} MB`, p + 10, p + 75);
+      }
+
+      ctx.restore();
   };
 
   const gameLoop = (time: number) => {
@@ -306,8 +441,15 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     if (canvas.width !== Math.floor(width * dpr)) {
         canvas.width = Math.floor(width * dpr); canvas.height = Math.floor(height * dpr);
         canvas.style.width = `${width}px`; canvas.style.height = `${height}px`;
+        layoutDirtyRef.current = true;
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // --- Update Static Cache if needed ---
+    if (layoutDirtyRef.current) {
+        updateStaticLayer();
+        layoutDirtyRef.current = false;
+    }
 
     const laneW = laneWidthRef.current; const startX = startXRef.current;
     const count = laneCountRef.current; const speed = pixelsPerSecondRef.current;
@@ -333,16 +475,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         beatPulse = Math.pow(1 - (gameTime % beatDur) / beatDur, 2); 
     }
 
-    // --- ENHANCED BACKGROUND RENDER ---
-    // 1. Base Gradient (Lighter than pure black)
+    // --- 1. Draw Dynamic Background ---
     const bgGrad = ctx.createLinearGradient(0, 0, 0, height);
-    bgGrad.addColorStop(0, '#13131f'); // Dark blue-grey at top
-    bgGrad.addColorStop(1, '#050508'); // Darker at bottom
+    bgGrad.addColorStop(0, '#13131f');
+    bgGrad.addColorStop(1, '#050508');
     ctx.fillStyle = bgGrad;
     ctx.fillRect(0, 0, width, height);
 
-    // 2. Always-on Ambient Light (Theme Color)
-    // Ensures the chart is never "pitch black" even in low intensity
     ctx.globalAlpha = 0.08;
     const baseAmbient = ctx.createRadialGradient(width/2, height/2, width*0.1, width/2, height/2, width*0.8);
     baseAmbient.addColorStop(0, theme.secondaryColor);
@@ -351,7 +490,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     ctx.fillRect(0, 0, width, height);
     ctx.globalAlpha = 1.0;
     
-    // 3. Dynamic Kiai / Intensity Bloom
     const baseOpacity = visualIntensity * 0.2;
     const kiaiBoost = isKiai ? (beatPulse * 0.3) : 0;
     const finalOpacity = Math.min(0.6, baseOpacity + kiaiBoost);
@@ -367,18 +505,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.globalAlpha = 1.0;
     }
     
-    // Track Background (slightly more visible now that bg is lighter)
-    ctx.fillStyle = 'rgba(15, 20, 25, 0.7)'; 
-    ctx.fillRect(startX, 0, count * laneW, height);
-
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-    for (let i = 1; i < count; i++) {
-        ctx.fillRect(startX + i * laneW - 0.5, 0, 1, height);
+    // --- 2. Draw Static Layer (Offscreen Canvas) ---
+    if (staticCanvasRef.current) {
+        // We need to draw the offscreen canvas at logical coordinates 0,0,width,height.
+        // The main context has transform(dpr, ...), so we draw in logical pixels.
+        // The offscreen canvas has size (width*dpr, height*dpr).
+        ctx.drawImage(staticCanvasRef.current, 0, 0, width, height);
+    } else {
+        // Fallback if cache fails (should not happen)
+        layoutDirtyRef.current = true;
     }
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-    ctx.fillRect(startX - 1, 0, 1, height);
-    ctx.fillRect(startX + count * laneW, 0, 1, height);
 
+    // --- 3. Draw Dynamic Elements over Lanes ---
     const hitBarAlpha = 0.4 + beatPulse * 0.3;
     ctx.fillStyle = `${theme.primaryColor}${Math.floor(hitBarAlpha * 255).toString(16).padStart(2,'0')}`;
     ctx.fillRect(startX, hitLineY - 1, count * laneW, 2);
@@ -411,8 +549,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     const viewLimitBottom = height + 100;
     
     // Notes Loop
-    // New logic: If hideNotes is true, we ONLY render if note.missed is true (to show failure).
-    // The hit particles are handled separately.
     notesRef.current.forEach(note => {
         if (!note.visible && !note.missed) return;
         
@@ -425,11 +561,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             scoreRef.current.combo++;
             if (scoreRef.current.combo > scoreRef.current.maxCombo) scoreRef.current.maxCombo = scoreRef.current.combo;
             
-            // Auto Score (no modifiers applied as per new rule, multiplier is 1.0)
             const totalNotes = notesRef.current.length || 1;
             const scorePerPerfect = ((MAX_SCORE * ACC_WEIGHT) / totalNotes) * 1.0 + ((MAX_SCORE * COMBO_WEIGHT) / totalNotes);
-            
-            // FIX: Clamp Score
             scoreRef.current.score = Math.min(MAX_SCORE, scoreRef.current.score + scorePerPerfect);
 
             triggerHitVisuals(note.lane, 'PERFECT');
@@ -446,7 +579,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                      const totalNotes = notesRef.current.length || 1;
                      const scorePerPerfect = ((MAX_SCORE * ACC_WEIGHT) / totalNotes) * 1.0 + ((MAX_SCORE * COMBO_WEIGHT) / totalNotes);
                      
-                     // FIX: Clamp Score
                      scoreRef.current.score = Math.min(MAX_SCORE, scoreRef.current.score + scorePerPerfect);
 
                      triggerHitVisuals(note.lane, 'PERFECT'); 
@@ -465,7 +597,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             
             if (note.hit && note.duration > 0 && note.isHolding) {
                 if (gameTime < note.time + note.duration) {
-                    if (Math.random() > 0.6) particlesRef.current.push(new Particle((startX + note.lane * laneW + laneW / 2), hitLineY, theme.secondaryColor));
+                    if (Math.random() > 0.6) {
+                        const p = particlePoolRef.current.get();
+                        p.reset((startX + note.lane * laneW + laneW / 2), hitLineY, theme.secondaryColor);
+                        particlesRef.current.push(p);
+                    }
                 } else { note.visible = false; note.isHolding = false; }
                 onScoreUpdate({...scoreRef.current});
             }
@@ -476,7 +612,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         
         if (headY < viewLimitTop || tailY > viewLimitBottom) return; 
 
-        // CRITICAL FIX: If hideNotes is enabled, simply SKIP the drawing part below unless missed
         if (hideNotes && !note.missed) return;
 
         const noteX = startX + note.lane * laneW + 4;
@@ -528,19 +663,37 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.restore();
     }
 
-    ghostNotesRef.current = ghostNotesRef.current.filter(g => g.life > 0);
-    ghostNotesRef.current.forEach(g => {
+    // Ghost Note Loop (Pooled)
+    const activeGhosts = ghostNotesRef.current;
+    for (let i = activeGhosts.length - 1; i >= 0; i--) {
+        const g = activeGhosts[i];
         const y = hitLineY - (g.timeDiff * speed);
         ctx.globalAlpha = g.life * 0.4; ctx.fillStyle = theme.secondaryColor;
         ctx.fillRect(startX + g.lane * laneW + 4, y - 6, laneW - 8, 12);
-        ctx.globalAlpha = 1.0; if (!isFrozen) g.life -= 0.05;
-    });
+        ctx.globalAlpha = 1.0; 
+        
+        if (!isFrozen) g.life -= 0.05;
+        
+        if (g.life <= 0) {
+            ghostNotePoolRef.current.release(g);
+            // Swap Remove
+            activeGhosts[i] = activeGhosts[activeGhosts.length - 1];
+            activeGhosts.pop();
+        }
+    }
 
-    for (let i = particlesRef.current.length - 1; i >= 0; i--) {
-        const p = particlesRef.current[i];
+    // Particle Loop (Pooled)
+    const activeParticles = particlesRef.current;
+    for (let i = activeParticles.length - 1; i >= 0; i--) {
+        const p = activeParticles[i];
         if (!isFrozen) p.update();
         p.draw(ctx);
-        if (p.life <= 0) particlesRef.current.splice(i, 1);
+        if (p.life <= 0) {
+            particlePoolRef.current.release(p);
+            // Swap Remove
+            activeParticles[i] = activeParticles[activeParticles.length - 1];
+            activeParticles.pop();
+        }
     }
 
     effectRef.current = effectRef.current.filter(effect => performance.now() - effect.time < 500);
@@ -562,6 +715,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.fillRect(0, 0, width, 4);
     ctx.fillStyle = theme.primaryColor; ctx.fillRect(0, 0, width * progress, 4);
 
+    // PERFORMANCE MOD VISUALIZER (SYSTEM STATS)
+    drawSystemStats(ctx, width, height, performance.now());
+
     if (scoreRef.current.combo > 0) {
         if (!isFrozen) comboScaleRef.current += (1.0 - comboScaleRef.current) * 0.15;
         ctx.save();
@@ -576,6 +732,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.restore();
     }
     
+    lastFrameTimeRef.current = performance.now();
     requestRef.current = requestAnimationFrame(gameLoop);
   };
 

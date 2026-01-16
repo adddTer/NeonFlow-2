@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Clock, Pause, LogOut, AlertTriangle, Zap, FastForward, Rewind, Crosshair, Skull, EyeOff, Flashlight, Bot, RotateCcw, ArrowLeft } from 'lucide-react';
+import { Play, Clock, Pause, LogOut, AlertTriangle, Zap, FastForward, Rewind, Crosshair, Skull, EyeOff, Flashlight, Bot, RotateCcw, ArrowLeft, Activity, Save } from 'lucide-react';
 import { getSongById, saveSong } from './services/storageService';
 import { calculateGrade } from './utils/scoring';
 import GameCanvas from './components/GameCanvas';
@@ -314,8 +314,8 @@ function App() {
             // Always increment play count
             const updatedSong = { ...fullSong, playCount: (fullSong.playCount || 0) + 1 };
             
-            // Only save record if NO MODS are active.
-            if (activeModifiers.size === 0) {
+            // Only save record if NO MODS are active, OR KeepScore mod is active.
+            if (activeModifiers.size === 0 || activeModifiers.has(GameModifier.KeepScore)) {
                  const { rank } = calculateGrade(resultScore.score);
                  const newResult: GameResult = {
                     score: Math.round(resultScore.score),
@@ -326,9 +326,10 @@ function App() {
                     rank: rank,
                     timestamp: Date.now(),
                     hitHistory: resultScore.hitHistory,
-                    modifiers: []
+                    modifiers: Array.from(activeModifiers) // Save active mods
                  };
                  
+                 // If KeepScore is on, we always save if it's high score, essentially treating "Unranked" as ranked locally.
                  if (!updatedSong.bestResult || newResult.score > updatedSong.bestResult.score) {
                     updatedSong.bestResult = newResult;
                  }
@@ -362,6 +363,14 @@ function App() {
       { id: GameModifier.Flashlight, label: 'FL', name: 'Flashlight', icon: <Flashlight className="w-5 h-5"/>, color: 'text-yellow-400', desc: '受限视野' },
       { id: GameModifier.Auto, label: 'Auto', name: 'Auto Play', icon: <Bot className="w-5 h-5"/>, color: 'text-green-400', desc: '自动演示' },
   ];
+
+  // Only add debug mods if debug mode is active
+  if (isDebugMode) {
+      MODS_LIST.push(
+          { id: GameModifier.Performance, label: 'PF', name: 'Perf Stats', icon: <Activity className="w-5 h-5"/>, color: 'text-cyan-400', desc: '显示系统性能监视' },
+          { id: GameModifier.KeepScore, label: 'SV', name: 'Force Save', icon: <Save className="w-5 h-5"/>, color: 'text-pink-400', desc: '强制保存成绩' }
+      );
+  }
 
   return (
     <div className="h-[100dvh] w-full flex flex-col transition-colors duration-1000 font-sans text-white select-none relative overflow-hidden" style={{ background: status === GameStatus.Library ? '#030304' : `radial-gradient(circle at center, ${theme.secondaryColor}22 0%, #030304 100%)` }}>
@@ -494,7 +503,7 @@ function App() {
                          <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4 flex items-center gap-2">
                              <Zap className="w-4 h-4" /> 游戏修改器 <span className="text-[10px] text-gray-600 ml-auto">(开启后将不计入最佳成绩)</span>
                          </div>
-                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
                              {MODS_LIST.map(mod => {
                                  const isActive = activeModifiers.has(mod.id);
                                  return (

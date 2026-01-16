@@ -23,7 +23,9 @@ export enum GameModifier {
   HardRock = 'HR',
   SuddenDeath = 'SD',
   Hidden = 'HD',
-  Flashlight = 'FL'
+  Flashlight = 'FL',
+  Performance = 'PERF', // New: Visual Hit Error Bar
+  KeepScore = 'SAVE'    // New: Force Save Score
 }
 
 export type LaneCount = 4 | 6;

@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Music, X, Check, Bug, CheckCircle, FilePlus, BrainCircuit, Mic2 } from 'lucide-react';
+import { Music, X, Check, Bug, CheckCircle, FilePlus, BrainCircuit, Mic2, Zap } from 'lucide-react';
 import { BeatmapDifficulty, LaneCount, PlayStyle } from '../../types';
 
 interface SongConfigModalProps {
@@ -45,16 +45,23 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
         if (mode === 'AUTO') {
             onConfirm(); // Normal AI Gen flow
         } else {
-            // Manual flow: Enforce AI analysis (skipAI = false)
-            setSkipAI(false);
+            // Manual flow: Enforce AI analysis skip (skipAI = true for empty)
+            // But wait, Manual usually means we skip AI analysis because we just want an empty chart.
+            // Let's ensure the hook knows this.
+            setSkipAI(true);
             onConfirm({ empty: true });
         }
     };
 
-    // When switching to manual, we default skipAI to false (enable analysis)
+    // When switching modes
     const toggleMode = (m: 'AUTO' | 'MANUAL') => {
         setMode(m);
-        setSkipAI(false); 
+        if (m === 'MANUAL') {
+             setSkipAI(true);
+        } else {
+             // Reset to default (don't skip AI unless user checks it)
+             setSkipAI(false);
+        }
     };
 
     return (
@@ -162,6 +169,27 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                                             </label>
                                         </div>
                                     </div>
+
+                                    {/* Skip AI Checkbox - ONLY IN DEBUG MODE */}
+                                    {isDebugMode && (
+                                        <div className={`p-4 rounded-xl border transition-colors cursor-pointer ${skipAI ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-white/5 border-white/10 hover:border-white/20'}`} onClick={() => setSkipAI(!skipAI)}>
+                                            <div className="flex items-start gap-3">
+                                                <div className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center transition-colors shrink-0 ${skipAI ? 'bg-yellow-500 border-yellow-500' : 'border-gray-500'}`}>
+                                                    {skipAI && <Check className="w-3.5 h-3.5 text-black" />}
+                                                </div>
+                                                <div>
+                                                    <div className={`text-sm font-bold flex items-center gap-2 ${skipAI ? 'text-yellow-500' : 'text-gray-300'}`}>
+                                                        <Bug className="w-3 h-3" />
+                                                        跳过 AI 分析 (Pure DSP)
+                                                    </div>
+                                                    <div className="text-[10px] text-gray-500 mt-1 leading-relaxed">
+                                                        仅使用数学算法生成节奏，不消耗 Token。<br/>
+                                                        适用于无 API Key 或快速测试场景。
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                                 </>
                             )}
                             
@@ -184,17 +212,6 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                                             >
                                                 6K
                                             </button>
-                                        </div>
-                                    </div>
-
-                                    {/* Enforce AI Analysis */}
-                                    <div className="flex items-center gap-3 p-2 rounded-lg border border-white/5 bg-white/5 cursor-not-allowed opacity-75">
-                                        <div className="w-5 h-5 rounded border flex items-center justify-center bg-neon-purple border-neon-purple">
-                                            <Check className="w-3.5 h-3.5 text-black" />
-                                        </div>
-                                        <div className="flex flex-col">
-                                            <span className="text-gray-200 font-bold text-sm">启用 AI 辅助分析</span>
-                                            <span className="text-[10px] text-gray-500">自动检测 BPM、曲名及生成视觉主题</span>
                                         </div>
                                     </div>
                                 </div>

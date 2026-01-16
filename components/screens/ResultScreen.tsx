@@ -110,7 +110,8 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                  <div className={`text-[10rem] md:text-[14rem] font-black italic leading-none select-none drop-shadow-2xl ${color} ${shadow || ''}`} style={{ textShadow: '0 0 40px currentColor' }}>
                      {rank}
                  </div>
-                 <div className="absolute top-full left-0 w-full text-center text-xl md:text-2xl font-black tracking-[0.5em] text-white opacity-80 uppercase mt-[-10px] md:mt-[-20px]">
+                 {/* Fixed: Changed mt-[-20px] to mt-4 to avoid overlap */}
+                 <div className="absolute top-full left-0 w-full text-center text-xl md:text-2xl font-black tracking-[0.5em] text-white opacity-80 uppercase mt-4">
                      {label}
                  </div>
             </div>
