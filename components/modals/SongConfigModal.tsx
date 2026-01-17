@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Music, X, Check, Bug, BrainCircuit, Mic2, AlertTriangle, RefreshCw, Layers } from 'lucide-react';
+import { Music, X, Check, Bug, BrainCircuit, Mic2, AlertTriangle, RefreshCw, Layers, Zap } from 'lucide-react';
 import { BeatmapDifficulty, LaneCount, PlayStyle } from '../../types';
 
 interface SongConfigModalProps {
@@ -21,6 +21,10 @@ interface SongConfigModalProps {
     aiOptions: any;
     setAiOptions: (o: any) => void;
     
+    // Pro Model props
+    useProModel?: boolean;
+    setUseProModel?: (b: boolean) => void;
+
     // Error Handling props
     errorState?: { hasError: boolean, type: string, message: string | null };
     resetError?: () => void;
@@ -40,7 +44,8 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
     features, setFeatures,
     isDebugMode, skipAI, setSkipAI,
     aiOptions, setAiOptions,
-    errorState, resetError
+    errorState, resetError,
+    useProModel, setUseProModel
 }) => {
     
     const [mode, setMode] = useState<'AUTO' | 'MANUAL'>('AUTO');
@@ -73,6 +78,8 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
 
     // --- Error View ---
     if (errorState?.hasError) {
+        const isRetryError = errorState.type === 'AI_RETRY_EXHAUSTED';
+        
         return (
             <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-fade-in font-sans">
                 <div className="bg-[#0f172a] border border-red-500/30 rounded-3xl p-8 w-full max-w-md shadow-2xl relative flex flex-col items-center text-center">
@@ -80,17 +87,33 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                         <AlertTriangle className="w-10 h-10 text-red-500" />
                     </div>
                     <h2 className="text-2xl font-black text-white mb-2">生成中断</h2>
-                    <p className="text-gray-400 text-sm mb-6 leading-relaxed">
+                    <p className="text-gray-400 text-sm mb-6 leading-relaxed whitespace-pre-line">
                         {errorState.message || "未知错误发生。"}
                     </p>
                     
                     <div className="w-full space-y-3">
+                        {/* Special Action for Retry Exhausted */}
+                        {isRetryError && setUseProModel && (
+                            <button 
+                                onClick={() => { 
+                                    resetError && resetError(); 
+                                    setUseProModel(true); 
+                                    handleConfirm(); 
+                                }}
+                                className="w-full py-4 bg-gradient-to-r from-neon-purple to-indigo-600 text-white font-black rounded-xl hover:shadow-[0_0_20px_rgba(139,92,246,0.5)] transition-all flex items-center justify-center gap-2 group mb-2"
+                            >
+                                <Zap className="w-4 h-4 fill-current group-hover:scale-110 transition-transform"/>
+                                升级至 Gemini 3 Pro 重试
+                            </button>
+                        )}
+
                         <button 
                             onClick={() => { resetError && resetError(); handleConfirm(); }}
                             className="w-full py-3 bg-white text-black font-bold rounded-xl hover:bg-gray-200 transition-colors"
                         >
-                            重试
+                            {isRetryError ? "保持当前模型重试" : "重试"}
                         </button>
+                        
                         {isDebugMode && (
                             <button 
                                 onClick={() => { resetError && resetError(); setSkipAI(true); handleConfirm(); }}
@@ -99,6 +122,7 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                                 尝试纯算法模式 (DSP Only)
                             </button>
                         )}
+                        
                         <button 
                             onClick={onCancel}
                             className="w-full py-3 text-gray-500 font-bold hover:text-white transition-colors text-sm"
@@ -279,9 +303,32 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                                      </div>
                                  </div>
 
+                                 {/* Pro Model Toggle */}
+                                 {setUseProModel && (
+                                     <div className="space-y-2 mt-2">
+                                         <button 
+                                             onClick={() => setUseProModel(!useProModel)}
+                                             className={`w-full p-4 rounded-xl border transition-all flex items-center justify-between group ${useProModel ? 'bg-neon-purple/10 border-neon-purple/50' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
+                                         >
+                                             <div className="flex items-center gap-3">
+                                                 <div className={`p-2 rounded-lg ${useProModel ? 'bg-neon-purple text-white' : 'bg-white/10 text-gray-400'}`}>
+                                                     <Zap className="w-5 h-5 fill-current" />
+                                                 </div>
+                                                 <div className="text-left">
+                                                     <div className={`text-sm font-bold ${useProModel ? 'text-white' : 'text-gray-400'}`}>Gemini 3 Pro 分析</div>
+                                                     <div className="text-[10px] text-gray-500">用于第二阶段结构分析 (更精准/更耗时)</div>
+                                                 </div>
+                                             </div>
+                                             <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${useProModel ? 'border-neon-purple bg-neon-purple text-white' : 'border-gray-600'}`}>
+                                                 {useProModel && <Check className="w-4 h-4" />}
+                                             </div>
+                                         </button>
+                                     </div>
+                                 )}
+
                                  {/* Debug / Skip AI */}
                                  {isDebugMode && (
-                                     <div className={`p-4 rounded-xl border transition-colors cursor-pointer mt-8 ${skipAI ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-white/5 border-white/10'}`} onClick={() => setSkipAI(!skipAI)}>
+                                     <div className={`p-4 rounded-xl border transition-colors cursor-pointer mt-4 ${skipAI ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-white/5 border-white/10'}`} onClick={() => setSkipAI(!skipAI)}>
                                          <div className="flex items-center gap-3">
                                              <Bug className={`w-4 h-4 ${skipAI ? 'text-yellow-500' : 'text-gray-500'}`} />
                                              <span className={`text-xs font-bold ${skipAI ? 'text-yellow-500' : 'text-gray-400'}`}>跳过 AI (使用纯 DSP 算法)</span>

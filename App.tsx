@@ -99,6 +99,7 @@ function App() {
     selectedLaneCount, setSelectedLaneCount, selectedPlayStyle, setSelectedPlayStyle,
     selectedDifficulty, setSelectedDifficulty, aiOptions, setAiOptions,
     beatmapFeatures, setBeatmapFeatures, skipAI, setSkipAI,
+    useProModel, setUseProModel, // FIX: Destructure these
     errorState, resetError
   } = useSongGenerator(
       customApiKey || process.env.API_KEY || "", 
@@ -373,7 +374,6 @@ function App() {
       { id: GameModifier.Auto, label: 'Auto', name: 'Auto Play', icon: <Bot className="w-5 h-5"/>, color: 'text-green-400', desc: '自动演示' },
   ];
 
-  // Only add debug mods if debug mode is active
   if (isDebugMode) {
       MODS_LIST.push(
           { id: GameModifier.Performance, label: 'PF', name: 'Perf Stats', icon: <Activity className="w-5 h-5"/>, color: 'text-cyan-400', desc: '显示系统性能监视' },
@@ -402,6 +402,7 @@ function App() {
             isDebugMode={isDebugMode} skipAI={skipAI} setSkipAI={setSkipAI}
             aiOptions={aiOptions} setAiOptions={setAiOptions}
             errorState={errorState} resetError={resetError}
+            useProModel={useProModel} setUseProModel={setUseProModel} // FIX: Pass down props
         />
       )}
       
@@ -415,7 +416,7 @@ function App() {
             apiKeyStatus={apiKeyStatus} customApiKey={customApiKey} setCustomApiKey={setCustomApiKey}
             handleSaveSettings={() => handleSaveSettings(() => setShowSettings(false))} validationError={validationError}
             rebindingKey={rebindingKey} setRebindingKey={setRebindingKey} hasEnvKey={hasEnvKey}
-            onRestartTutorial={restartTutorial} // Pass the restart function
+            onRestartTutorial={restartTutorial} 
         />
       )}
 

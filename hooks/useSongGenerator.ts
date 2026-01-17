@@ -38,6 +38,7 @@ export const useSongGenerator = (
     const [aiOptions, setAiOptions] = useState<GenerationOptions>({ structure: true, theme: true, metadata: true });
     const [beatmapFeatures, setBeatmapFeatures] = useState({ normal: true, holds: true, catch: true });
     const [skipAI, setSkipAI] = useState(false);
+    const [useProModel, setUseProModel] = useState(false);
     
     // New Error State for Modal
     const [errorState, setErrorState] = useState<{ hasError: boolean, type: string, message: string | null }>({ hasError: false, type: '', message: null });
@@ -47,6 +48,7 @@ export const useSongGenerator = (
         if (!file) return;
         setPendingFile(file);
         setSelectedDifficulty(10); // Default to 10
+        setUseProModel(false); // Reset to Flash by default
         setIsConfiguringSong(true); 
         event.target.value = '';
     };
@@ -106,19 +108,47 @@ export const useSongGenerator = (
                 structure = { bpm: 120, sections: [{ startTime: 0, endTime: decodedBuffer.duration, type: 'verse', intensity: 0.8, style: 'stream' }] };
                 aiMetadata = { title: file.name.replace(/\.[^/.]+$/, ""), artist: "Unknown Artist" };
             } else {
-                setLoadingStage("云端智能分析");
-                setLoadingSubText("识别音乐结构、BPM与情感色彩...");
-                // AI Start: 20%. AI End: 80%. Allocating majority of bar to the slow part.
-                setLoadingProgress(25);
                 
                 if (apiKeyStatus === 'valid' && apiKey) {
                     const base64String = await fileUtils_fileToBase64(file);
                     const base64Data = base64String.split(',')[1];
-                    // Async call, progress jumps after completion
-                    const aiResult = await analyzeStructureWithGemini(file.name, base64Data, file.type, apiKey, aiOptions);
-                    structure = aiResult.structure;
-                    aiTheme = aiResult.theme;
-                    aiMetadata = aiResult.metadata;
+                    
+                    // Selected Model Logic: Metadata ALWAYS uses Flash. Structure uses selection.
+                    const metaModel = 'gemini-3-flash-preview';
+                    const structureModel = useProModel ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
+
+                    // --- Phase 1: Metadata Analysis ---
+                    setLoadingStage("智能分析 (1/2)");
+                    setLoadingSubText("正在检索歌曲信息 (Flash)...");
+                    setLoadingProgress(30);
+                    
+                    // Call for Metadata Only
+                    const metaResult = await analyzeStructureWithGemini(file.name, base64Data, file.type, apiKey, {
+                        ...aiOptions,
+                        structure: false,
+                        theme: false,
+                        metadata: true,
+                        modelOverride: metaModel // Always Flash
+                    });
+                    aiMetadata = metaResult.metadata;
+
+                    // --- Phase 2: Structure Analysis ---
+                    setLoadingStage("智能分析 (2/2)");
+                    setLoadingSubText(`正在规划谱面结构 (${useProModel ? 'Pro' : 'Flash'})...`);
+                    setLoadingProgress(50);
+
+                    // Call for Structure & Theme
+                    const structResult = await analyzeStructureWithGemini(file.name, base64Data, file.type, apiKey, {
+                        ...aiOptions,
+                        structure: true,
+                        theme: true,
+                        metadata: false,
+                        modelOverride: structureModel // User Selection
+                    });
+                    
+                    structure = structResult.structure;
+                    aiTheme = structResult.theme;
+                    
                     setLoadingProgress(80);
                 } else {
                     throw new Error("API Key Missing");
@@ -210,6 +240,9 @@ export const useSongGenerator = (
                 type = 'API_KEY_MISSING';
                 msg = "Gemini API 调用失败。可能是 Key 无效、额度不足或网络问题。";
                 if (onError) onError('API_KEY_MISSING');
+            } else if (error.message === "AI_RETRY_EXHAUSTED") {
+                type = 'AI_RETRY_EXHAUSTED';
+                msg = "AI 无法生成有效内容 (重试次数耗尽)。\n建议升级模型或使用纯算法模式。";
             } else if (error.message.includes("503") || error.message.includes("Overloaded")) {
                 type = 'API_OVERLOAD';
                 msg = "AI 服务繁忙，请稍后重试或使用纯算法模式。";
@@ -235,6 +268,7 @@ export const useSongGenerator = (
         aiOptions, setAiOptions,
         beatmapFeatures, setBeatmapFeatures,
         skipAI, setSkipAI,
-        errorState, resetError // New exports
+        useProModel, setUseProModel,
+        errorState, resetError
     };
 };

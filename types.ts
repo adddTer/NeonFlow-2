@@ -58,9 +58,11 @@ export interface Onset {
 
 // 方向一：动态描述符
 export interface MotionDescriptors {
-    flow: 'linear' | 'zigzag' | 'circular' | 'random';
+    flow: 'linear' | 'zigzag' | 'circular' | 'random' | 'slide'; 
     hand_bias: 'alternating' | 'left_heavy' | 'right_heavy' | 'balanced';
     focus: 'vocal' | 'drum' | 'melody' | 'bass';
+    // Added special pattern type for AI designed rhythmic sections
+    special_pattern?: 'burst' | 'fill' | 'none';
 }
 
 // Gemini 决策层输出：歌曲结构元数据

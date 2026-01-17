@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { SongStructure, AITheme, DEFAULT_THEME, NoteLane } from "../types";
+import { SongStructure, AITheme, DEFAULT_THEME } from "../types";
 
 const getEffectiveKey = (userKey?: string) => {
   if (userKey && userKey.trim().length > 0) {
@@ -33,7 +33,41 @@ export interface GenerationOptions {
     metadata: boolean;
     difficultyLevel?: number; // 1-20
     stylePreference?: string; // 'Balanced' | 'Stream' | 'Tech' | 'Flow'
+    modelOverride?: string; // Allow forcing a model (e.g. Pro)
 }
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+const generateWithRetry = async (
+    ai: GoogleGenAI, 
+    model: string, 
+    prompt: any, 
+    maxRetries = 3
+): Promise<any> => {
+    let lastError;
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            const response = await ai.models.generateContent({
+                model: model,
+                contents: prompt.contents,
+                config: prompt.config
+            });
+            
+            if (response.text) {
+                // Validate JSON parsing
+                const data = JSON.parse(response.text);
+                return data; 
+            } else {
+                throw new Error("Empty response text");
+            }
+        } catch (e: any) {
+            console.warn(`Gemini Attempt ${i+1} failed:`, e);
+            lastError = e;
+            if (i < maxRetries - 1) await sleep(1500 * (i + 1)); // Backoff
+        }
+    }
+    throw lastError;
+};
 
 /**
  * AI 决策层：分析歌曲结构 + 视觉主题 + 元数据识别
@@ -45,6 +79,7 @@ export const analyzeStructureWithGemini = async (
   userApiKey?: string,
   options: GenerationOptions = { structure: true, theme: true, metadata: true }
 ): Promise<{ structure: SongStructure, theme: AITheme, metadata?: { title?: string, artist?: string, album?: string } }> => {
+  
   const apiKey = getEffectiveKey(userApiKey);
 
   const defaultStructure: SongStructure = {
@@ -68,65 +103,68 @@ export const analyzeStructureWithGemini = async (
   }
 
   const ai = new GoogleGenAI({ apiKey });
+  const modelName = options.modelOverride || 'gemini-3-flash-preview';
 
   try {
     const diffLevel = options.difficultyLevel || 10;
     const style = options.stylePreference || 'Balanced';
 
-    let systemInstruction = `You are an expert Rhythm Game Choreographer. Analyze the audio for structure, theme, and playability.
+    let systemInstruction = `You are a World-Class Rhythm Game Level Designer (Mapper).
     
-    CONTEXT:
-    - User Request Difficulty: ${diffLevel}/20 (1=Beginner, 20=Grandmaster).
+    GLOBAL CONTEXT:
+    - Target Difficulty: ${diffLevel} / 20.
     - Style Preference: ${style}.
-    - Do NOT blindly follow the difficulty number. Listen to the song. If the song is slow and calm, do NOT force high intensity even if difficulty is 20. If it's fast, allow intensity.
-    - Your output determines the "skeleton" of the beatmap.
+    
+    CRITICAL INSTRUCTION FOR PATTERN SELECTION:
+    1. **Low Difficulty (1-7)**:
+       - When you hear pitch scaling (stairs) or continuous flows, use **'slide'**.
+       - 'slide' triggers Catch/Slider notes, which are fun and easy.
+       - AVOID 'linear' (streams) at low difficulty.
+       
+    2. **High Difficulty (12-20)**:
+       - When you hear pitch scaling or fast rhythms, use **'linear'**.
+       - 'linear' triggers dense Note Streams (Stairs), requiring high stamina.
+       - Use 'slide' ONLY for very specific synthesizer wubs or glissandos.
+    
+    3. **Mid Difficulty (8-11)**:
+       - Mix 'linear' and 'slide' based on the instrument. 
+       - Vocals -> 'slide'. Drums -> 'linear'/'zigzag'.
     `;
 
     let taskInstruction = "";
-    
+    const properties: any = {};
+    const requiredProps: string[] = [];
+
+    // --- Task 1: Structure (If requested) ---
     if (options.structure) {
         taskInstruction += `
         Task 1: Structure & Choreography
         - Identify accurate BPM.
-        - Segment song by musical phrases.
-        - For each section, define "Motion Descriptors" suitable for a ${diffLevel}/20 difficulty chart:
-          - flow: "linear" (scales), "zigzag" (jumps), "circular" (rolls), "random".
-          - hand_bias: "alternating", "left_heavy", "right_heavy", "balanced".
-          - focus: "vocal", "drum", "melody", "bass".
-          - intensity: 0.0 to 1.0 (Relative density).
+        - **Micro-Segmentation**: 
+          - The music changes frequently. Do NOT create sections longer than 8-10 seconds unless the song is monotonous.
+          - Detect changes in: Drum Pattern (Kick/Snare), Instrument Density, Vocal Flow.
+          - Create a new section immediately when the texture changes.
+        
+        - Define "Motion Descriptors" for each section:
+          - style: 'stream' (continuous), 'jump' (spiky), 'hold' (long notes), 'simple' (breaks).
+          - descriptors.flow: 
+             - 'slide': Smooth visual movement (Low Diff = Catch Stairs; High Diff = Tech Sliders).
+             - 'linear': Directional streams (Low Diff = Avoid; High Diff = Stamina Stairs).
+             - 'circular': Rolling patterns.
+             - 'zigzag': Sharp, angular jumps.
+             - 'random': Chaotic/High Energy.
+          - descriptors.focus: 
+             - 'drum': Lock onto Kick/Snare.
+             - 'melody': Follow lead synth/guitar.
+             - 'vocal': Follow voice.
+             - 'bass': Follow bassline.
+          - descriptors.special_pattern: 
+             - 'burst': Extremely fast 1/4 or 1/8 bursts (Drum fills).
+             - 'fill': Syncopated rhythm pattern.
+             - 'none': Standard.
+          - intensity: 0.0 (Silence) to 1.0 (Peak Climax).
         `;
-    }
-    
-    if (options.theme) {
-        taskInstruction += `
-        Task 2: Visual Theme
-        - Analyze the mood.
-        - Generate colors (Hex codes).
-        `;
-    }
-
-    if (options.metadata) {
-        taskInstruction += `
-        Task 3: Metadata Extraction & Cleaning
-        - Filename provided: "${filename}"
-        - Use the 'googleSearch' tool to find the official track title and artist.
-        - Rules for Title:
-          1. Remove file extensions (like .mp3, .flac).
-          2. Remove the Artist part if it appears in the filename (e.g. "Artist - Title" -> keep "Title").
-          3. **Language Priority**: If the title is bilingual (e.g. official title has both Chinese and English), ALWAYS format it as "[Chinese Title] [English Title]". Chinese MUST come first. Separate with a single space. No parentheses.
-             - Example: "A Dramatic Irony 戏剧性反讽" -> "戏剧性反讽 A Dramatic Irony".
-          4. **Preserve Stylistic Syntax**: Do NOT remove special characters that are part of the actual song title (e.g. "NAME == ", "feat.", "vs.").
-             - Example: "NAME == 隐德来希 NAME == Entelechy" must be preserved exactly, do not shorten to "隐德来希 Entelechy".
-          5. If specific metadata cannot be found, clean the filename by replacing underscores with spaces.
-        `;
-    }
-
-    taskInstruction += `\nReturn strictly JSON.`;
-
-    const properties: any = {};
-    const requiredProps: string[] = [];
-
-    if (options.structure) {
+        
         properties.bpm = { type: Type.NUMBER };
         properties.sections = {
           type: Type.ARRAY,
@@ -141,9 +179,10 @@ export const analyzeStructureWithGemini = async (
                 descriptors: {
                     type: Type.OBJECT,
                     properties: {
-                        flow: { type: Type.STRING, enum: ['linear', 'zigzag', 'circular', 'random'] },
+                        flow: { type: Type.STRING, enum: ['linear', 'zigzag', 'circular', 'random', 'slide'] },
                         hand_bias: { type: Type.STRING, enum: ['alternating', 'left_heavy', 'right_heavy', 'balanced'] },
-                        focus: { type: Type.STRING, enum: ['vocal', 'drum', 'melody', 'bass'] }
+                        focus: { type: Type.STRING, enum: ['vocal', 'drum', 'melody', 'bass'] },
+                        special_pattern: { type: Type.STRING, enum: ['burst', 'fill', 'none'] }
                     },
                     required: ['flow', 'hand_bias', 'focus']
                 }
@@ -153,8 +192,13 @@ export const analyzeStructureWithGemini = async (
         };
         requiredProps.push("bpm", "sections");
     }
-
+    
+    // --- Task 2: Theme (If requested) ---
     if (options.theme) {
+        taskInstruction += `
+        Task 2: Visual Theme
+        - Select colors that match the song's emotion (e.g., Red/Black for Aggressive, Pink/Cyan for Pop, Blue/Purple for Electronic).
+        `;
         properties.theme = {
             type: Type.OBJECT,
             properties: {
@@ -170,7 +214,13 @@ export const analyzeStructureWithGemini = async (
         requiredProps.push("theme");
     }
 
+    // --- Task 3: Metadata (If requested) ---
     if (options.metadata) {
+        taskInstruction += `
+        Task 3: Metadata
+        - Filename: "${filename}"
+        - Use 'googleSearch' to find official Title/Artist.
+        `;
         properties.metadata = {
             type: Type.OBJECT,
             properties: {
@@ -181,65 +231,69 @@ export const analyzeStructureWithGemini = async (
         };
     }
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: {
-        parts: [
-          { inlineData: { mimeType: mimeType, data: audioBase64 } },
-          { text: systemInstruction + taskInstruction }
-        ]
-      },
-      config: {
-        tools: options.metadata ? [{ googleSearch: {} }] : [],
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: properties,
-          required: requiredProps.length > 0 ? requiredProps : undefined
+    taskInstruction += `\nReturn strictly JSON.`;
+
+    const promptPayload = {
+        contents: {
+            parts: [
+                { inlineData: { mimeType: mimeType, data: audioBase64 } },
+                { text: systemInstruction + taskInstruction }
+            ]
+        },
+        config: {
+            tools: options.metadata ? [{ googleSearch: {} }] : [],
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: properties,
+                required: requiredProps.length > 0 ? requiredProps : undefined
+            }
         }
-      }
-    });
+    };
 
-    if (response.text) {
-      const data = JSON.parse(response.text) as AIAnalysisResult;
-      
-      let structureResult = defaultStructure;
-      if (options.structure && data.bpm && data.sections) {
-          const normalizedSections = data.sections.map((s: any) => ({
-              ...s,
-              descriptors: s.descriptors || { flow: 'random', hand_bias: 'balanced', focus: 'melody' }
-          }));
-          structureResult = { bpm: data.bpm, sections: normalizedSections };
-      }
-      
-      if (options.theme && data.theme) {
-          finalTheme = {
-              primaryColor: data.theme.primaryColor,
-              secondaryColor: data.theme.secondaryColor,
-              catchColor: data.theme.catchColor || DEFAULT_THEME.catchColor,
-              perfectColor: data.theme.perfectColor || data.theme.primaryColor,
-              goodColor: data.theme.goodColor || '#ffffff',
-              moodDescription: data.theme.mood
-          };
-      }
+    try {
+        const data = await generateWithRetry(ai, modelName, promptPayload, 3);
+        
+        let structureResult = defaultStructure;
+        if (options.structure && data.bpm && data.sections) {
+            const normalizedSections = data.sections.map((s: any) => ({
+                ...s,
+                descriptors: s.descriptors || { flow: 'random', hand_bias: 'balanced', focus: 'melody' }
+            }));
+            structureResult = { bpm: data.bpm, sections: normalizedSections };
+        }
+        
+        if (options.theme && data.theme) {
+            finalTheme = {
+                primaryColor: data.theme.primaryColor,
+                secondaryColor: data.theme.secondaryColor,
+                catchColor: data.theme.catchColor || DEFAULT_THEME.catchColor,
+                perfectColor: data.theme.perfectColor || data.theme.primaryColor,
+                goodColor: data.theme.goodColor || '#ffffff',
+                moodDescription: data.theme.mood
+            };
+        }
 
-      if (options.metadata && data.metadata) {
-          finalMetadata.title = data.metadata.identifiedTitle;
-          finalMetadata.artist = data.metadata.identifiedArtist;
-          finalMetadata.album = data.metadata.identifiedAlbum;
-      }
+        if (options.metadata && data.metadata) {
+            finalMetadata.title = data.metadata.identifiedTitle;
+            finalMetadata.artist = data.metadata.identifiedArtist;
+            finalMetadata.album = data.metadata.identifiedAlbum;
+        }
 
-      return { structure: structureResult, theme: finalTheme, metadata: finalMetadata };
+        return { structure: structureResult, theme: finalTheme, metadata: finalMetadata };
+
+    } catch (e: any) {
+        throw new Error("AI_RETRY_EXHAUSTED");
     }
-  } catch (error) {
+
+  } catch (error: any) {
     console.error("Gemini Analysis Failed:", error);
+    if (error.message === "AI_RETRY_EXHAUSTED") throw error; // Re-throw specific error
     throw error;
   }
-  
-  return { structure: defaultStructure, theme: finalTheme, metadata: finalMetadata };
 };
 
-// ... keep generatePatternWithGemini as is ...
+// ... generatePatternWithGemini ...
 export const generatePatternWithGemini = async (
     prompt: string,
     params: {
