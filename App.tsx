@@ -387,7 +387,10 @@ function App() {
       {/* Modals & Overlays */}
       {showOnboarding && <OnboardingOverlay onComplete={completeOnboarding} />}
       {showCalibration && <AudioCalibration initialOffset={audioOffset} onClose={(newOffset) => { setAudioOffset(newOffset); localStorage.setItem('neonflow_audio_offset', String(newOffset)); setShowCalibration(false); setShowSettings(true); }} />}
-      {showMetadataDebug && <MetadataDebugger onClose={() => { setShowMetadataDebug(false); setShowSettings(true); }} />}
+      {showMetadataDebug && <MetadataDebugger 
+          apiKey={customApiKey || process.env.API_KEY || ''} 
+          onClose={() => { setShowMetadataDebug(false); setShowSettings(true); }} 
+      />}
       {showProfile && <ProfileModal songs={librarySongs} onClose={() => setShowProfile(false)} />}
       
       {isConfiguringSong && pendingFile && (
