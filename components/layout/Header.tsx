@@ -15,7 +15,8 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({ 
     status, theme, apiKeyStatus, onBack, onSettings, onTitleClick 
 }) => {
-    if (status === GameStatus.Playing || status === GameStatus.Countdown || status === GameStatus.Paused) return null;
+    // Hide header in Editing mode as well to use the editor's internal toolbar
+    if (status === GameStatus.Playing || status === GameStatus.Countdown || status === GameStatus.Paused || status === GameStatus.Editing) return null;
 
     const isLibrary = status === GameStatus.Library;
 

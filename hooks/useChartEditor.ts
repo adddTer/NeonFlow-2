@@ -177,8 +177,12 @@ export const useChartEditor = ({
         }));
 
         // Merge and sort
-        const combined = [...notes, ...addedNotes].sort((a, b) => a.time - b.time);
-        setNotes(combined);
+        // FIX: Use functional update to ensure we are appending to the LATEST state (e.g. after a delete operation in same cycle)
+        setNotes(prev => {
+            const combined = [...prev, ...addedNotes].sort((a, b) => a.time - b.time);
+            return combined;
+        });
+        
         setHasUnsavedChanges(true);
         // Optionally select the newly added notes
         setSelectedNoteIds(new Set(addedNotes.map(n => n.id)));

@@ -3,7 +3,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { EditorCanvas } from '../editor/EditorCanvas';
 import { useChartEditor, EditorTool, SnapDivisor } from '../../hooks/useChartEditor';
 import { SavedSong, AITheme, NoteType, KeyConfig } from '../../types';
-import { Play, Pause, Save, LogOut, Plus, Trash2, MousePointer, Magnet, Clock, ChevronDown, Layers, Music, Settings2, AlertTriangle, X, Circle, Mic, Sparkles, Send, Bot, Zap, AudioWaveform } from 'lucide-react';
+import { Play, Pause, Save, LogOut, Plus, Trash2, MousePointer, Magnet, Clock, ChevronDown, Layers, Music, Settings2, AlertTriangle, X, Circle, Mic, Sparkles, Send, Bot, Zap, AudioWaveform, Lock } from 'lucide-react';
 import { saveSong, getSongById } from '../../services/storageService';
 import { generatePatternWithGemini } from '../../services/geminiService';
 import { useAppSettings } from '../../hooks/useAppSettings';
@@ -27,7 +27,6 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
     const [aiPrompt, setAiPrompt] = useState("");
     const [aiIsLoading, setAiIsLoading] = useState(false);
     const [aiTargetBeats, setAiTargetBeats] = useState(16); // Slider controlled
-    // Removed alignToDrums state - now ALWAYS enforced
     const { customApiKey, apiKeyStatus } = useAppSettings();
 
     // Recording State
@@ -57,7 +56,6 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
     }, [song.id]);
 
     const handleSave = async (newNotes: any[]) => {
-        // Critical Fix: Fetch full song to ensure we have audioData. 
         const fullSong = await getSongById(song.id);
         
         if (!fullSong) {
@@ -83,6 +81,32 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
         onSave: handleSave
     });
 
+    // --- Unsaved Changes Protection ---
+    useEffect(() => {
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (editor.hasUnsavedChanges) {
+                e.preventDefault();
+                e.returnValue = ''; // Standard for Chrome/Firefox
+            }
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        
+        // Update Document Title
+        const originalTitle = document.title;
+        if (editor.hasUnsavedChanges) {
+            document.title = `* ${song.title} - Editor`;
+        } else {
+            document.title = `${song.title} - Editor`;
+        }
+
+        return () => {
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+            document.title = originalTitle;
+        };
+    }, [editor.hasUnsavedChanges, song.title]);
+
+
     // Helper: Get visual AI region
     const beatDuration = 60 / editor.bpm;
     const snappedStartTime = Math.round(editor.currentTime / beatDuration) * beatDuration;
@@ -92,9 +116,12 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
     const aiEndTime = snappedStartTime + effectiveAiDuration;
     
     const isLongDurationMode = effectiveAiDuration > 25.0;
+    const isApiValid = apiKeyStatus === 'valid';
 
     // --- AI Copilot Handlers ---
     const handleAiGenerate = async (overridePrompt?: string) => {
+        if (!isApiValid) return; // Guard
+        
         const promptToUse = overridePrompt || aiPrompt;
         if (!promptToUse.trim()) return;
         if (effectiveAiDuration <= 0) {
@@ -146,12 +173,14 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
                 {
                     bpm: editor.bpm,
                     laneCount: song.laneCount,
-                    beatCount: Math.ceil(effectiveAiDuration / beatDuration)
+                    beatCount: Math.ceil(effectiveAiDuration / beatDuration),
+                    startTime: snappedStartTime
                 },
                 {
                     audioBase64: audioContextBase64,
                     precedingNotes: precedingNotes,
-                    existingNotesInWindow: existingNotesInWindow
+                    existingNotesInWindow: existingNotesInWindow,
+                    structure: song.structure
                 },
                 customApiKey
             );
@@ -325,7 +354,10 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
                     </button>
                     <div className="h-6 w-px bg-white/10"></div>
                     <div className="flex flex-col justify-center">
-                        <div className="font-bold text-sm text-gray-200 max-w-[200px] truncate">{song.title}</div>
+                        <div className="font-bold text-sm text-gray-200 max-w-[200px] truncate">
+                            {editor.hasUnsavedChanges && <span className="text-neon-blue mr-1">*</span>}
+                            {song.title}
+                        </div>
                         <div className="text-[10px] text-neon-blue font-bold tracking-wider uppercase">Chart Editor</div>
                     </div>
                 </div>
@@ -430,7 +462,8 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
                             onClick={() => setActiveTab('COPILOT')}
                             className={`flex-1 py-3 text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 border-b-2 transition-all ${activeTab === 'COPILOT' ? 'text-neon-purple border-neon-purple' : 'text-gray-600 border-transparent hover:text-gray-400'}`}
                         >
-                            <Sparkles className="w-3 h-3" /> AI Copilot
+                            <Sparkles className="w-3 h-3" /> AI Copilot 
+                            <span className="bg-neon-purple/20 text-neon-purple border border-neon-purple/50 px-1.5 py-0.5 rounded text-[8px] font-bold">BETA</span>
                         </button>
                     </div>
                     
@@ -578,8 +611,20 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
 
                         {/* === COPILOT TAB === */}
                         {activeTab === 'COPILOT' && (
-                            <div className="space-y-6 animate-fade-in h-full flex flex-col">
-                                <div className="bg-gradient-to-br from-neon-purple/20 to-transparent p-4 rounded-xl border border-neon-purple/20 relative overflow-hidden">
+                            <div className="space-y-6 animate-fade-in h-full flex flex-col relative">
+                                {!isApiValid && (
+                                    <div className="absolute inset-0 z-20 bg-black/60 backdrop-blur-sm rounded-xl flex flex-col items-center justify-center p-4 text-center border border-white/10">
+                                        <div className="p-3 bg-red-500/20 rounded-full mb-3 shadow-[0_0_20px_rgba(239,68,68,0.2)]">
+                                            <Lock className="w-6 h-6 text-red-400" />
+                                        </div>
+                                        <h3 className="text-sm font-black text-white uppercase tracking-wider mb-2">服务不可用</h3>
+                                        <p className="text-[10px] text-gray-400 leading-relaxed max-w-[200px]">
+                                            请在设置中配置有效的 Google Gemini API Key 以启用 AI 辅助功能。
+                                        </p>
+                                    </div>
+                                )}
+
+                                <div className="bg-gradient-to-br from-neon-purple/20 to-transparent p-4 rounded-xl border border-neon-purple/20 relative overflow-hidden shrink-0">
                                     <Bot className="w-24 h-24 text-neon-purple absolute -bottom-4 -right-4 opacity-20" />
                                     <h3 className="text-sm font-black text-white uppercase tracking-wider mb-2 relative z-10">AI 创作助手</h3>
                                     <p className="text-[10px] text-gray-300 leading-relaxed relative z-10">
@@ -588,9 +633,9 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
                                     </p>
                                 </div>
 
-                                <div className="space-y-4 flex-1">
+                                <div className={`space-y-4 flex-1 flex flex-col ${!isApiValid ? 'opacity-30 pointer-events-none' : ''}`}>
                                     {/* Range Slider */}
-                                    <div className="p-3 bg-white/5 rounded-xl border border-white/10">
+                                    <div className="p-3 bg-white/5 rounded-xl border border-white/10 shrink-0">
                                         <div className="flex justify-between items-center mb-2">
                                             <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
                                                 生成时长 (Beats)
@@ -615,20 +660,20 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
                                         )}
                                     </div>
 
-                                    <div>
+                                    <div className="flex-1 flex flex-col">
                                         <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-2 block">指令</label>
-                                        <div className="relative">
+                                        <div className="relative flex-1">
                                             <textarea 
                                                 value={aiPrompt}
                                                 onChange={e => setAiPrompt(e.target.value)}
                                                 placeholder="例：&#10;- 根据鼓点生成交互&#10;- 覆盖这段并生成人声长条&#10;- 先清空第1轨，然后加入反拍音符"
-                                                className="w-full h-28 bg-black/40 border border-white/10 rounded-xl p-3 text-xs text-white placeholder:text-gray-600 focus:border-neon-purple outline-none resize-none"
+                                                className="w-full h-full bg-black/40 border border-white/10 rounded-xl p-3 text-xs text-white placeholder:text-gray-600 focus:border-neon-purple outline-none resize-none"
                                             />
-                                            <div className="absolute bottom-2 right-2">
+                                            <div className="absolute bottom-3 right-3">
                                                 <button 
                                                     onClick={() => handleAiGenerate()}
                                                     disabled={aiIsLoading || !aiPrompt.trim()}
-                                                    className="p-2 bg-neon-purple text-white rounded-lg hover:bg-white hover:text-neon-purple transition-all shadow-lg disabled:opacity-50 disabled:scale-100 active:scale-95"
+                                                    className="p-2 bg-neon-purple text-white rounded-lg hover:bg-white hover:text-neon-purple transition-all shadow-lg disabled:opacity-50 disabled:scale-100 active:scale-95 flex items-center justify-center w-8 h-8"
                                                 >
                                                     {aiIsLoading ? <Zap className="w-4 h-4 animate-pulse" /> : <Send className="w-4 h-4" />}
                                                 </button>
@@ -636,7 +681,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
                                         </div>
                                     </div>
 
-                                    <div>
+                                    <div className="shrink-0">
                                         <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-2 block">快速预设</label>
                                         <div className="grid grid-cols-2 gap-2">
                                             {[
@@ -656,13 +701,6 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
                                         </div>
                                     </div>
                                 </div>
-                                
-                                {apiKeyStatus !== 'valid' && (
-                                    <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-center">
-                                        <p className="text-[10px] text-red-300 font-bold mb-1">API Key 未配置</p>
-                                        <p className="text-[9px] text-red-400/80">AI 功能不可用，请前往设置配置。</p>
-                                    </div>
-                                )}
                             </div>
                         )}
                     </div>

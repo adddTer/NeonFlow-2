@@ -1,6 +1,6 @@
 
-import React, { useState } from 'react';
-import { Music, X, Check, Bug, CheckCircle, FilePlus, BrainCircuit, Mic2, Zap } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Music, X, Check, Bug, BrainCircuit, Mic2, AlertTriangle, RefreshCw, Layers } from 'lucide-react';
 import { BeatmapDifficulty, LaneCount, PlayStyle } from '../../types';
 
 interface SongConfigModalProps {
@@ -11,262 +11,305 @@ interface SongConfigModalProps {
     setLaneCount: (c: LaneCount) => void;
     playStyle: PlayStyle;
     setPlayStyle: (s: PlayStyle) => void;
-    difficulty: BeatmapDifficulty | null;
-    setDifficulty: (d: BeatmapDifficulty) => void;
+    difficulty: number | null; // Changed from BeatmapDifficulty to number (1-20)
+    setDifficulty: (d: number) => void;
     features: { normal: boolean; holds: boolean; catch: boolean };
     setFeatures: (f: any) => void;
     isDebugMode: boolean;
     skipAI: boolean;
     setSkipAI: (b: boolean) => void;
+    aiOptions: any;
+    setAiOptions: (o: any) => void;
+    
+    // Error Handling props
+    errorState?: { hasError: boolean, type: string, message: string | null };
+    resetError?: () => void;
 }
+
+const STYLE_PRESETS = [
+    { id: 'Balanced', label: '综合均衡', desc: '节奏与旋律并重', color: 'bg-blue-500' },
+    { id: 'Stream', label: '体力流', desc: '高密度连点', color: 'bg-red-500' },
+    { id: 'Tech', label: '技巧流', desc: '复杂切分与交互', color: 'bg-purple-500' },
+    { id: 'Flow', label: '流畅感', desc: '顺滑的键位移动', color: 'bg-green-500' },
+];
 
 export const SongConfigModal: React.FC<SongConfigModalProps> = ({
     file, onCancel, onConfirm,
     laneCount, setLaneCount,
-    playStyle, setPlayStyle,
     difficulty, setDifficulty,
     features, setFeatures,
-    isDebugMode, skipAI, setSkipAI
+    isDebugMode, skipAI, setSkipAI,
+    aiOptions, setAiOptions,
+    errorState, resetError
 }) => {
     
     const [mode, setMode] = useState<'AUTO' | 'MANUAL'>('AUTO');
+    const [style, setStyle] = useState<string>('Balanced');
+    
+    // Init difficulty if null
+    useEffect(() => {
+        if (difficulty === null) setDifficulty(10);
+    }, []);
 
-    const handleDifficultySelect = (diff: BeatmapDifficulty) => {
-        setDifficulty(diff);
-        if (diff === BeatmapDifficulty.Titan) {
-            setLaneCount(6);
-            setPlayStyle('MULTI');
-        }
-    };
-
-    const isAnyFeatureSelected = features.normal || features.holds || features.catch;
+    // Update AI options when style changes
+    useEffect(() => {
+        setAiOptions({ ...aiOptions, stylePreference: style, difficultyLevel: difficulty || 10 });
+    }, [style, difficulty]);
 
     const handleConfirm = () => {
         if (mode === 'AUTO') {
-            onConfirm(); // Normal AI Gen flow
+            onConfirm(); 
         } else {
-            // Manual flow: Enforce AI analysis skip (skipAI = true for empty)
-            // But wait, Manual usually means we skip AI analysis because we just want an empty chart.
-            // Let's ensure the hook knows this.
             setSkipAI(true);
             onConfirm({ empty: true });
         }
     };
 
-    // When switching modes
     const toggleMode = (m: 'AUTO' | 'MANUAL') => {
         setMode(m);
-        if (m === 'MANUAL') {
-             setSkipAI(true);
-        } else {
-             // Reset to default (don't skip AI unless user checks it)
-             setSkipAI(false);
-        }
+        if (m === 'MANUAL') setSkipAI(true);
+        else setSkipAI(false);
+    };
+
+    // --- Error View ---
+    if (errorState?.hasError) {
+        return (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-fade-in font-sans">
+                <div className="bg-[#0f172a] border border-red-500/30 rounded-3xl p-8 w-full max-w-md shadow-2xl relative flex flex-col items-center text-center">
+                    <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mb-6 animate-pulse">
+                        <AlertTriangle className="w-10 h-10 text-red-500" />
+                    </div>
+                    <h2 className="text-2xl font-black text-white mb-2">生成中断</h2>
+                    <p className="text-gray-400 text-sm mb-6 leading-relaxed">
+                        {errorState.message || "未知错误发生。"}
+                    </p>
+                    
+                    <div className="w-full space-y-3">
+                        <button 
+                            onClick={() => { resetError && resetError(); handleConfirm(); }}
+                            className="w-full py-3 bg-white text-black font-bold rounded-xl hover:bg-gray-200 transition-colors"
+                        >
+                            重试
+                        </button>
+                        {isDebugMode && (
+                            <button 
+                                onClick={() => { resetError && resetError(); setSkipAI(true); handleConfirm(); }}
+                                className="w-full py-3 bg-white/5 text-white font-bold rounded-xl hover:bg-white/10 transition-colors border border-white/10"
+                            >
+                                尝试纯算法模式 (DSP Only)
+                            </button>
+                        )}
+                        <button 
+                            onClick={onCancel}
+                            className="w-full py-3 text-gray-500 font-bold hover:text-white transition-colors text-sm"
+                        >
+                            取消
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // --- Main Config View ---
+    const diffColor = (val: number) => {
+        if (val <= 5) return 'text-green-400';
+        if (val <= 10) return 'text-blue-400';
+        if (val <= 15) return 'text-orange-400';
+        return 'text-red-500';
+    };
+
+    const getDiffLabel = (val: number) => {
+        if (val <= 5) return "入门";
+        if (val <= 10) return "进阶";
+        if (val <= 15) return "专家";
+        return "大师";
     };
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in">
-             <div className="bg-[#0f172a] border border-white/20 rounded-3xl p-8 w-full max-w-4xl shadow-2xl relative flex flex-col max-h-[90vh] overflow-y-auto custom-scrollbar">
-                 <button onClick={onCancel} className="absolute top-4 right-4 text-gray-400 hover:text-white transition-colors z-10 p-2 bg-black/20 rounded-full">
-                     <X className="w-6 h-6" />
-                 </button>
-
-                 <h1 className="text-2xl font-black tracking-tight mb-6 flex items-center gap-3">
-                     <Music className="w-6 h-6 text-neon-blue" />
-                     配置新乐谱
-                 </h1>
-
-                 {/* Top: File Info */}
-                 <div className="mb-8 p-4 rounded-2xl bg-white/5 border border-white/10 flex justify-between items-center">
-                     <div>
-                        <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">选定文件</div>
-                        <div className="text-lg font-bold text-white break-all line-clamp-1">{file.name}</div>
-                     </div>
-                     <div className="text-xs font-mono text-gray-400">{(file.size / 1024 / 1024).toFixed(2)} MB</div>
-                 </div>
-
-                 {/* Mode Switcher */}
-                 <div className="grid grid-cols-2 gap-4 mb-8">
-                     <button 
-                        onClick={() => toggleMode('AUTO')}
-                        className={`p-6 rounded-2xl border-2 transition-all flex flex-col gap-3 text-left relative overflow-hidden group ${mode === 'AUTO' ? 'border-neon-blue bg-neon-blue/10' : 'border-white/10 bg-black/20 hover:bg-white/5'}`}
-                     >
-                         <div className={`p-3 rounded-xl w-fit ${mode === 'AUTO' ? 'bg-neon-blue text-black' : 'bg-white/10 text-gray-400'}`}>
-                             <BrainCircuit className="w-6 h-6" />
-                         </div>
-                         <div>
-                             <div className={`text-lg font-black uppercase tracking-wider ${mode === 'AUTO' ? 'text-white' : 'text-gray-400'}`}>AI 自动生成</div>
-                             <div className="text-xs text-gray-500 font-bold mt-1">智能分析节奏，一键生成完整谱面</div>
-                         </div>
-                     </button>
-
-                     <button 
-                        onClick={() => toggleMode('MANUAL')}
-                        className={`p-6 rounded-2xl border-2 transition-all flex flex-col gap-3 text-left relative overflow-hidden group ${mode === 'MANUAL' ? 'border-white bg-white/10' : 'border-white/10 bg-black/20 hover:bg-white/5'}`}
-                     >
-                         <div className={`p-3 rounded-xl w-fit ${mode === 'MANUAL' ? 'bg-white text-black' : 'bg-white/10 text-gray-400'}`}>
-                             <Mic2 className="w-6 h-6" />
-                         </div>
-                         <div>
-                             <div className={`text-lg font-black uppercase tracking-wider ${mode === 'MANUAL' ? 'text-white' : 'text-gray-400'}`}>手动创作</div>
-                             <div className="text-xs text-gray-500 font-bold mt-1">创建空白谱面，支持实时录制输入</div>
-                         </div>
-                     </button>
-                 </div>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in font-sans">
+             <div className="bg-[#0f172a] border border-white/20 rounded-3xl w-full max-w-5xl shadow-2xl relative flex flex-col max-h-[95vh] overflow-hidden">
                  
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                     {/* Options Column */}
-                     <div className="space-y-6">
+                 {/* Header */}
+                 <div className="p-6 border-b border-white/10 flex justify-between items-center bg-[#0a0a0a]">
+                     <div className="flex items-center gap-4">
+                         <div className="p-3 bg-neon-blue/10 rounded-xl">
+                             <Music className="w-6 h-6 text-neon-blue" />
+                         </div>
+                         <div>
+                             <h1 className="text-xl font-black text-white tracking-tight uppercase">配置工程</h1>
+                             <div className="text-xs text-gray-500 font-mono mt-0.5 max-w-[200px] truncate">{file.name}</div>
+                         </div>
+                     </div>
+                     <button onClick={onCancel} className="text-gray-400 hover:text-white transition-colors p-2 hover:bg-white/10 rounded-full">
+                         <X className="w-6 h-6" />
+                     </button>
+                 </div>
 
-                         <div className="space-y-4">
-                            
-                            {mode === 'AUTO' && (
-                                <>
-                                    <div>
-                                        <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-2">按键模式</h3>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <button 
-                                                onClick={() => setLaneCount(4)} 
-                                                disabled={difficulty === BeatmapDifficulty.Titan}
-                                                className={`p-3 rounded-xl text-left font-bold transition-all border 
-                                                    ${laneCount === 4 
-                                                        ? 'bg-neon-blue border-neon-blue text-black' 
-                                                        : (difficulty === BeatmapDifficulty.Titan)
-                                                            ? 'bg-transparent border-white/5 text-gray-600 cursor-not-allowed opacity-50'
-                                                            : 'bg-transparent border-white/10 text-gray-400 hover:bg-white/5'}`}
-                                            >
-                                                4道
-                                            </button>
-                                            <button onClick={() => setLaneCount(6)} className={`p-3 rounded-xl text-left font-bold transition-all border ${laneCount === 6 ? 'bg-neon-blue border-neon-blue text-black' : 'bg-transparent border-white/10 text-gray-400 hover:bg-white/5'}`}>
-                                                6道
-                                            </button>
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-3">
-                                        <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">生成元素</h3>
-                                        <div className="space-y-2">
-                                            <label className="flex items-center gap-3 cursor-pointer group hover:bg-white/5 p-2 rounded-lg transition-colors -ml-2">
-                                                <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${features.normal ? 'bg-neon-blue border-neon-blue' : 'border-gray-500'}`}>
-                                                    {features.normal && <Check className="w-3.5 h-3.5 text-black" />}
-                                                </div>
-                                                <input type="checkbox" className="hidden" checked={features.normal} onChange={e => setFeatures({...features, normal: e.target.checked})} />
-                                                <span className="text-gray-200 font-bold text-sm">单点音符</span>
-                                            </label>
-                                            <label className="flex items-center gap-3 cursor-pointer group hover:bg-white/5 p-2 rounded-lg transition-colors -ml-2">
-                                                <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${features.holds ? 'bg-neon-blue border-neon-blue' : 'border-gray-500'}`}>
-                                                    {features.holds && <Check className="w-3.5 h-3.5 text-black" />}
-                                                </div>
-                                                <input type="checkbox" className="hidden" checked={features.holds} onChange={e => setFeatures({...features, holds: e.target.checked})} />
-                                                <span className="text-gray-200 font-bold text-sm">长条音符</span>
-                                            </label>
-                                            <label className="flex items-center gap-3 cursor-pointer group hover:bg-white/5 p-2 rounded-lg transition-colors -ml-2">
-                                                <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${features.catch ? 'bg-neon-blue border-neon-blue' : 'border-gray-500'}`}>
-                                                    {features.catch && <Check className="w-3.5 h-3.5 text-black" />}
-                                                </div>
-                                                <input type="checkbox" className="hidden" checked={features.catch} onChange={e => setFeatures({...features, catch: e.target.checked})} />
-                                                <span className="text-gray-200 font-bold text-sm">滑键音符</span>
-                                            </label>
-                                        </div>
-                                    </div>
+                 <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
+                     
+                     {/* Left: Mode Selection */}
+                     <div className="w-full md:w-1/3 p-6 bg-[#111] border-r border-white/5 flex flex-col gap-4 overflow-y-auto">
+                         <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">生成模式</h3>
+                         
+                         <button 
+                            onClick={() => toggleMode('AUTO')}
+                            className={`p-5 rounded-2xl border-2 transition-all text-left group relative overflow-hidden ${mode === 'AUTO' ? 'border-neon-blue bg-neon-blue/5' : 'border-white/5 bg-white/5 hover:bg-white/10'}`}
+                         >
+                             <div className="flex justify-between items-start mb-2">
+                                 <BrainCircuit className={`w-6 h-6 ${mode === 'AUTO' ? 'text-neon-blue' : 'text-gray-500'}`} />
+                                 {mode === 'AUTO' && <div className="w-2 h-2 bg-neon-blue rounded-full shadow-[0_0_10px_#00f3ff]"></div>}
+                             </div>
+                             <div className={`font-black text-lg ${mode === 'AUTO' ? 'text-white' : 'text-gray-400'}`}>AI 智能生成</div>
+                             <div className="text-xs text-gray-500 mt-1 leading-relaxed">
+                                 Gemini 分析音乐情感与结构，生成完整的谱面。
+                             </div>
+                         </button>
 
-                                    {/* Skip AI Checkbox - ONLY IN DEBUG MODE */}
-                                    {isDebugMode && (
-                                        <div className={`p-4 rounded-xl border transition-colors cursor-pointer ${skipAI ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-white/5 border-white/10 hover:border-white/20'}`} onClick={() => setSkipAI(!skipAI)}>
-                                            <div className="flex items-start gap-3">
-                                                <div className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center transition-colors shrink-0 ${skipAI ? 'bg-yellow-500 border-yellow-500' : 'border-gray-500'}`}>
-                                                    {skipAI && <Check className="w-3.5 h-3.5 text-black" />}
-                                                </div>
-                                                <div>
-                                                    <div className={`text-sm font-bold flex items-center gap-2 ${skipAI ? 'text-yellow-500' : 'text-gray-300'}`}>
-                                                        <Bug className="w-3 h-3" />
-                                                        跳过 AI 分析 (Pure DSP)
-                                                    </div>
-                                                    <div className="text-[10px] text-gray-500 mt-1 leading-relaxed">
-                                                        仅使用数学算法生成节奏，不消耗 Token。<br/>
-                                                        适用于无 API Key 或快速测试场景。
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-                                </>
-                            )}
-                            
-                            {mode === 'MANUAL' && (
-                                <div className="p-4 rounded-xl bg-neon-purple/5 border border-neon-purple/20 space-y-4">
-                                    <div className="flex items-center justify-between">
-                                        <h3 className="text-sm font-bold text-neon-purple uppercase tracking-widest flex items-center gap-2">
-                                            <BrainCircuit className="w-3 h-3"/> 基础配置
-                                        </h3>
-                                        <div className="flex bg-black/40 rounded-lg p-0.5 border border-neon-purple/20">
-                                            <button 
-                                                onClick={() => setLaneCount(4)}
-                                                className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${laneCount === 4 ? 'bg-neon-purple text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
-                                            >
-                                                4K
-                                            </button>
-                                            <button 
-                                                onClick={() => setLaneCount(6)}
-                                                className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${laneCount === 6 ? 'bg-neon-purple text-white shadow-sm' : 'text-gray-400 hover:text-white'}`}
-                                            >
-                                                6K
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
+                         <button 
+                            onClick={() => toggleMode('MANUAL')}
+                            className={`p-5 rounded-2xl border-2 transition-all text-left group relative overflow-hidden ${mode === 'MANUAL' ? 'border-white bg-white/5' : 'border-white/5 bg-white/5 hover:bg-white/10'}`}
+                         >
+                             <div className="flex justify-between items-start mb-2">
+                                 <Mic2 className={`w-6 h-6 ${mode === 'MANUAL' ? 'text-white' : 'text-gray-500'}`} />
+                                 {mode === 'MANUAL' && <div className="w-2 h-2 bg-white rounded-full"></div>}
+                             </div>
+                             <div className={`font-black text-lg ${mode === 'MANUAL' ? 'text-white' : 'text-gray-400'}`}>空白工程</div>
+                             <div className="text-xs text-gray-500 mt-1 leading-relaxed">
+                                 创建空白谱面，使用编辑器自行创作或录制。
+                             </div>
+                         </button>
 
+                         {/* Common Options */}
+                         <div className="mt-auto space-y-4 pt-6 border-t border-white/5">
+                             <div className="space-y-2">
+                                 <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">轨道数量</label>
+                                 <div className="flex gap-2">
+                                     {[4, 6].map(k => (
+                                         <button
+                                             key={k}
+                                             onClick={() => setLaneCount(k as LaneCount)}
+                                             className={`flex-1 py-3 rounded-xl font-black text-sm transition-all border ${laneCount === k ? 'bg-white text-black border-white' : 'bg-black text-gray-500 border-white/10 hover:border-white/30'}`}
+                                         >
+                                             {k}K
+                                         </button>
+                                     ))}
+                                 </div>
+                             </div>
                          </div>
                      </div>
 
-                     {/* Difficulty Column */}
-                     <div className="flex flex-col gap-3">
+                     {/* Right: Detailed Config */}
+                     <div className="flex-1 p-6 md:p-8 bg-[#0f172a] overflow-y-auto custom-scrollbar relative">
                          {mode === 'AUTO' ? (
-                             <>
-                                 <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest">选择难度</h3>
-                                 {[
-                                    { id: BeatmapDifficulty.Easy, label: 'Easy', desc: '轻松休闲', color: 'bg-green-500' },
-                                    { id: BeatmapDifficulty.Normal, label: 'Normal', desc: '标准难度', color: 'bg-blue-500' },
-                                    { id: BeatmapDifficulty.Hard, label: 'Hard', desc: '进阶挑战', color: 'bg-orange-500' },
-                                    { id: BeatmapDifficulty.Expert, label: 'Expert', desc: '硬核极限', color: 'bg-red-600' },
-                                    { id: BeatmapDifficulty.Titan, label: 'TITAN', desc: '6K / 混沌', color: 'bg-purple-600' },
-                                 ].map((diffOption) => (
-                                     <button
-                                        key={diffOption.id}
-                                        onClick={() => handleDifficultySelect(diffOption.id as BeatmapDifficulty)}
-                                        className={`relative overflow-hidden rounded-xl p-4 text-left transition-all border group ${difficulty === diffOption.id ? 'bg-white/10 border-neon-blue' : 'border-white/10 hover:bg-white/5 hover:border-white/20'}`}
-                                     >
-                                         <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${diffOption.color}`}></div>
-                                         <div className="flex justify-between items-center pl-4">
-                                             <div>
-                                                 <div className={`font-black italic text-lg ${difficulty === diffOption.id ? 'text-white' : 'text-gray-300'}`}>{diffOption.label}</div>
-                                                 <div className="text-xs text-gray-500">{diffOption.desc}</div>
-                                             </div>
-                                             {difficulty === diffOption.id && <CheckCircle className="w-5 h-5 text-neon-blue" />}
+                             <div className="space-y-10 animate-fade-in pb-20">
+                                 
+                                 {/* Difficulty Slider */}
+                                 <div className="space-y-4">
+                                     <div className="flex justify-between items-end">
+                                         <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                                             <Layers className="w-4 h-4 text-gray-400"/> 难度等级
+                                         </h3>
+                                         <div className={`text-3xl font-black tracking-tighter font-sans ${diffColor(difficulty || 10)}`}>
+                                             {getDiffLabel(difficulty || 10)}
                                          </div>
-                                     </button>
-                                 ))}
-                            </>
+                                     </div>
+                                     
+                                     <div className="relative h-12 flex items-center group">
+                                         <div className="absolute inset-0 bg-white/5 rounded-xl border border-white/5 group-hover:border-white/10 transition-colors"></div>
+                                         <div 
+                                            className="absolute left-2 right-2 h-2 rounded-full overflow-hidden bg-gray-800"
+                                         >
+                                             <div 
+                                                className={`h-full transition-all duration-300 ${difficulty! <= 10 ? 'bg-gradient-to-r from-green-400 to-blue-500' : 'bg-gradient-to-r from-blue-500 via-orange-500 to-red-600'}`}
+                                                style={{ width: `${(difficulty! / 20) * 100}%` }}
+                                             ></div>
+                                         </div>
+                                         <input 
+                                             type="range" min="1" max="20" step="1"
+                                             value={difficulty || 10}
+                                             onChange={(e) => setDifficulty(Number(e.target.value))}
+                                             className="absolute inset-0 w-full opacity-0 cursor-pointer z-10"
+                                         />
+                                     </div>
+                                     <div className="flex justify-between text-[10px] text-gray-500 font-bold uppercase tracking-widest px-1">
+                                         <span>入门</span>
+                                         <span>进阶</span>
+                                         <span>专家</span>
+                                         <span>大师</span>
+                                     </div>
+                                 </div>
+
+                                 {/* Style Presets */}
+                                 <div className="space-y-4">
+                                     <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                                         <BrainCircuit className="w-4 h-4 text-gray-400"/> 风格倾向
+                                     </h3>
+                                     <div className="grid grid-cols-2 gap-3">
+                                         {STYLE_PRESETS.map(p => (
+                                             <button
+                                                 key={p.id}
+                                                 onClick={() => setStyle(p.id)}
+                                                 className={`p-3 rounded-xl border text-left transition-all relative overflow-hidden ${style === p.id ? 'border-white/40 bg-white/5' : 'border-white/5 bg-black/20 hover:bg-white/5'}`}
+                                             >
+                                                 {style === p.id && <div className={`absolute left-0 top-0 bottom-0 w-1 ${p.color}`}></div>}
+                                                 <div className={`font-bold text-sm ${style === p.id ? 'text-white' : 'text-gray-400'}`}>{p.label}</div>
+                                                 <div className="text-[10px] text-gray-600">{p.desc}</div>
+                                             </button>
+                                         ))}
+                                     </div>
+                                 </div>
+
+                                 {/* Features */}
+                                 <div className="space-y-4">
+                                     <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                                         <RefreshCw className="w-4 h-4 text-gray-400"/> 生成元素
+                                     </h3>
+                                     <div className="flex flex-wrap gap-2">
+                                         {[{k:'normal', l:'单点'}, {k:'holds', l:'长条'}, {k:'catch', l:'滑键'}].map(feat => (
+                                             <button
+                                                 key={feat.k}
+                                                 onClick={() => setFeatures({...features, [feat.k]: !features[feat.k as keyof typeof features]})}
+                                                 className={`px-4 py-2 rounded-lg text-xs font-bold border transition-all flex items-center gap-2 ${features[feat.k as keyof typeof features] ? 'bg-white text-black border-white' : 'bg-black text-gray-500 border-white/10'}`}
+                                             >
+                                                 {features[feat.k as keyof typeof features] && <Check className="w-3 h-3"/>}
+                                                 {feat.l}
+                                             </button>
+                                         ))}
+                                     </div>
+                                 </div>
+
+                                 {/* Debug / Skip AI */}
+                                 {isDebugMode && (
+                                     <div className={`p-4 rounded-xl border transition-colors cursor-pointer mt-8 ${skipAI ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-white/5 border-white/10'}`} onClick={() => setSkipAI(!skipAI)}>
+                                         <div className="flex items-center gap-3">
+                                             <Bug className={`w-4 h-4 ${skipAI ? 'text-yellow-500' : 'text-gray-500'}`} />
+                                             <span className={`text-xs font-bold ${skipAI ? 'text-yellow-500' : 'text-gray-400'}`}>跳过 AI (使用纯 DSP 算法)</span>
+                                         </div>
+                                     </div>
+                                 )}
+
+                             </div>
                          ) : (
-                             <div className="h-full flex flex-col justify-center items-center text-center p-6 border border-white/5 rounded-2xl bg-white/5">
-                                 <FilePlus className="w-16 h-16 text-gray-600 mb-4" />
-                                 <h3 className="text-xl font-bold text-white mb-2">手动模式</h3>
-                                 <p className="text-sm text-gray-400">将创建一个空的谱面文件。<br/>您可以在编辑器中使用“录制”功能快速编排。</p>
+                             <div className="h-full flex flex-col justify-center items-center text-center opacity-50">
+                                 <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center mb-4">
+                                     <Mic2 className="w-8 h-8 text-white" />
+                                 </div>
+                                 <p className="text-sm text-gray-400">手动模式下无需额外配置。</p>
                              </div>
                          )}
 
-                         <div className="flex-1"></div>
-
-                         <button 
-                            onClick={handleConfirm}
-                            disabled={mode === 'AUTO' && (!difficulty || !isAnyFeatureSelected)}
-                            className={`mt-4 py-4 rounded-xl font-black text-lg uppercase tracking-widest hover:scale-[1.02] transition-all shadow-lg disabled:opacity-30 disabled:scale-100 disabled:shadow-none
-                                ${mode === 'AUTO' ? 'bg-neon-blue text-black hover:bg-white' : 'bg-white text-black hover:bg-gray-200'}
-                            `}
-                         >
-                             {mode === 'AUTO' ? '开始生成' : '创建空白谱面'}
-                         </button>
+                         {/* Confirm Button (Floating) */}
+                         <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-[#0f172a] to-transparent">
+                             <button 
+                                onClick={handleConfirm}
+                                className={`w-full py-4 rounded-xl font-black text-lg uppercase tracking-widest hover:scale-[1.02] transition-all shadow-xl active:scale-95 flex items-center justify-center gap-3
+                                    ${mode === 'AUTO' ? 'bg-neon-blue text-black hover:bg-white' : 'bg-white text-black'}
+                                `}
+                             >
+                                 {mode === 'AUTO' ? '开始生成' : '创建工程'}
+                             </button>
+                         </div>
                      </div>
                  </div>
              </div>

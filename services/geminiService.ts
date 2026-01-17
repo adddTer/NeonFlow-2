@@ -31,6 +31,8 @@ export interface GenerationOptions {
     structure: boolean;
     theme: boolean;
     metadata: boolean;
+    difficultyLevel?: number; // 1-20
+    stylePreference?: string; // 'Balanced' | 'Stream' | 'Tech' | 'Flow'
 }
 
 /**
@@ -45,7 +47,6 @@ export const analyzeStructureWithGemini = async (
 ): Promise<{ structure: SongStructure, theme: AITheme, metadata?: { title?: string, artist?: string, album?: string } }> => {
   const apiKey = getEffectiveKey(userApiKey);
 
-  // 默认结构（保底）
   const defaultStructure: SongStructure = {
       bpm: 120,
       sections: [{ 
@@ -58,7 +59,6 @@ export const analyzeStructureWithGemini = async (
       }]
   };
   
-  // 默认主题
   let finalTheme = { ...DEFAULT_THEME };
   const finalMetadata = { title: undefined as string | undefined, artist: undefined as string | undefined, album: undefined as string | undefined };
 
@@ -70,37 +70,54 @@ export const analyzeStructureWithGemini = async (
   const ai = new GoogleGenAI({ apiKey });
 
   try {
-    // Direction 1: Role Upgrade - Choreographer
-    let systemInstruction = `You are an expert Rhythm Game Choreographer (Chart Designer). You analyze audio not just for structure, but for the *physical sensation* of playing it.`;
+    const diffLevel = options.difficultyLevel || 10;
+    const style = options.stylePreference || 'Balanced';
+
+    let systemInstruction = `You are an expert Rhythm Game Choreographer. Analyze the audio for structure, theme, and playability.
+    
+    CONTEXT:
+    - User Request Difficulty: ${diffLevel}/20 (1=Beginner, 20=Grandmaster).
+    - Style Preference: ${style}.
+    - Do NOT blindly follow the difficulty number. Listen to the song. If the song is slow and calm, do NOT force high intensity even if difficulty is 20. If it's fast, allow intensity.
+    - Your output determines the "skeleton" of the beatmap.
+    `;
+
     let taskInstruction = "";
     
     if (options.structure) {
         taskInstruction += `
-        Task 1: Choreography Analysis
-        - Identify BPM.
-        - Segment song.
-        - **MANDATORY**: For each section, provide "Motion Descriptors":
-          - flow: "linear" (scales/stairs), "zigzag" (trills/jumps), "circular" (rolls), "random".
-          - hand_bias: "alternating" (L-R-L-R), "left_heavy", "right_heavy", "balanced".
-          - focus: "vocal" (lyrical, sustained), "drum" (rhythmic, impact), "melody", "bass".
-          - intensity: 0.0-1.0.
+        Task 1: Structure & Choreography
+        - Identify accurate BPM.
+        - Segment song by musical phrases.
+        - For each section, define "Motion Descriptors" suitable for a ${diffLevel}/20 difficulty chart:
+          - flow: "linear" (scales), "zigzag" (jumps), "circular" (rolls), "random".
+          - hand_bias: "alternating", "left_heavy", "right_heavy", "balanced".
+          - focus: "vocal", "drum", "melody", "bass".
+          - intensity: 0.0 to 1.0 (Relative density).
         `;
     }
     
     if (options.theme) {
         taskInstruction += `
         Task 2: Visual Theme
-        - Analyze the "Vibe".
-        - Generate palette: primaryColor, secondaryColor, catchColor.
+        - Analyze the mood.
+        - Generate colors (Hex codes).
         `;
     }
 
     if (options.metadata) {
         taskInstruction += `
-        Task 3: Metadata
-        - Filename: "${filename}"
-        - Remove brackets, ft., official.
-        - Prioritize original language title.
+        Task 3: Metadata Extraction & Cleaning
+        - Filename provided: "${filename}"
+        - Use the 'googleSearch' tool to find the official track title and artist.
+        - Rules for Title:
+          1. Remove file extensions (like .mp3, .flac).
+          2. Remove the Artist part if it appears in the filename (e.g. "Artist - Title" -> keep "Title").
+          3. **Language Priority**: If the title is bilingual (e.g. official title has both Chinese and English), ALWAYS format it as "[Chinese Title] [English Title]". Chinese MUST come first. Separate with a single space. No parentheses.
+             - Example: "A Dramatic Irony 戏剧性反讽" -> "戏剧性反讽 A Dramatic Irony".
+          4. **Preserve Stylistic Syntax**: Do NOT remove special characters that are part of the actual song title (e.g. "NAME == ", "feat.", "vs.").
+             - Example: "NAME == 隐德来希 NAME == Entelechy" must be preserved exactly, do not shorten to "隐德来希 Entelechy".
+          5. If specific metadata cannot be found, clean the filename by replacing underscores with spaces.
         `;
     }
 
@@ -121,7 +138,6 @@ export const analyzeStructureWithGemini = async (
                 type: { type: Type.STRING },
                 intensity: { type: Type.NUMBER },
                 style: { type: Type.STRING, enum: ['stream', 'jump', 'hold', 'simple'] },
-                // NEW: Motion Descriptors
                 descriptors: {
                     type: Type.OBJECT,
                     properties: {
@@ -189,7 +205,6 @@ export const analyzeStructureWithGemini = async (
       
       let structureResult = defaultStructure;
       if (options.structure && data.bpm && data.sections) {
-          // Normalize descriptors if missing
           const normalizedSections = data.sections.map((s: any) => ({
               ...s,
               descriptors: s.descriptors || { flow: 'random', hand_bias: 'balanced', focus: 'melody' }
@@ -224,27 +239,27 @@ export const analyzeStructureWithGemini = async (
   return { structure: defaultStructure, theme: finalTheme, metadata: finalMetadata };
 };
 
-/**
- * Editor AI Copilot: Generate patterns based on user prompt with Audio Context
- */
+// ... keep generatePatternWithGemini as is ...
 export const generatePatternWithGemini = async (
     prompt: string,
     params: {
         bpm: number;
         laneCount: number;
-        beatCount: number; // Length of pattern in beats
+        beatCount: number; 
+        startTime?: number; 
     },
     context: {
-        audioBase64?: string; // Short snippet (~5-10s)
-        precedingNotes?: { lane: number, timeDiff: number }[]; // Notes just before cursor
-        existingNotesInWindow?: { lane: number, beatOffset: number }[]; // EXISTING NOTES IN TARGET AREA
+        audioBase64?: string; 
+        precedingNotes?: { lane: number, timeDiff: number }[]; 
+        existingNotesInWindow?: { lane: number, beatOffset: number }[]; 
+        structure?: SongStructure; 
     },
     userApiKey?: string
 ): Promise<{ 
     instructions: {
         type: 'CLEAR' | 'ADD';
-        lanes?: number[]; // For CLEAR (empty = all)
-        notes?: { beatOffset: number, lane: number, duration: number }[]; // For ADD
+        lanes?: number[]; 
+        notes?: { beatOffset: number, lane: number, duration: number }[]; 
     }[]
 }> => {
     const apiKey = getEffectiveKey(userApiKey);
@@ -252,24 +267,39 @@ export const generatePatternWithGemini = async (
 
     const ai = new GoogleGenAI({ apiKey });
 
+    // Build structure info string
+    const structureContext = context.structure?.sections.map(s => 
+        `- [${s.startTime.toFixed(1)}s - ${s.endTime.toFixed(1)}s] ${s.type.toUpperCase()} (Intensity: ${s.intensity})`
+    ).join('\n') || "Structure unknown.";
+
     const systemInstruction = `
         You are an AI Assistant for a Rhythm Game Beatmap Editor.
         Your task is to interpret the user's natural language command and generate a SEQUENCE of edit instructions.
         
-        CONTEXT:
+        GLOBAL CONTEXT:
         - Mode: ${params.laneCount}K (Lanes 0 to ${params.laneCount - 1})
         - BPM: ${params.bpm}
-        - Target Range: ${params.beatCount} beats.
+        - Current Position: ${params.startTime ? params.startTime.toFixed(1) + 's' : '0.0s'}
+        
+        SONG STRUCTURE AWARENESS:
+        ${structureContext}
         
         INPUT DATA:
         - Audio Snippet: Starts at cursor (Beat 0). Align to transients.
         - Existing Notes: Provided in 'existingNotesInWindow'.
+        - Target Range: ${params.beatCount} beats.
         
-        INSTRUCTIONS LOGIC:
-        - You can return multiple instructions to be executed in order.
-        - **IMPORTANT**: If the user asks to "replace", "change", "overwrite", or "fix" something, you **MUST** issue a 'CLEAR' instruction first for the relevant lanes/area, followed by an 'ADD' instruction.
-        - If the user asks to "add" or "layer" without removing, just use 'ADD'.
-        - If the user asks to "delete" or "clear", just use 'CLEAR'.
+        DECISION LOGIC (CRITICAL):
+        1. **DEFAULT MODE = REPLACE**: If the user's intent is to create or generate a pattern (e.g., "create stream", "make jumps", "follow the drums", "fill this section"), you **MUST** clear the target area first to ensure a clean slate.
+           - Return structure: [ { "type": "CLEAR" }, { "type": "ADD", "notes": [...] } ]
+           
+        2. **ADD MODE**: Only if the user EXPLICITLY says "add to", "layer on top", "keep existing", "don't delete", or "fill empty space".
+           - Return structure: [ { "type": "ADD", "notes": [...] } ]
+           
+        3. **DELETE MODE**: If the user says "clear", "remove", "delete", "empty".
+           - Return structure: [ { "type": "CLEAR" } ]
+        
+        Do not allow new notes to clash with old ones unless "layering" is explicitly requested. When in doubt, CLEAR first.
         
         EXISTING NOTES IN TARGET AREA:
         ${context.existingNotesInWindow && context.existingNotesInWindow.length > 0 

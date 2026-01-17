@@ -8,6 +8,7 @@ import { LibraryScreen } from './components/screens/LibraryScreen';
 import { ResultScreen } from './components/screens/ResultScreen';
 import { AudioCalibration } from './components/screens/AudioCalibration';
 import { EditorScreen } from './components/screens/EditorScreen';
+import { SongDetailsScreen } from './components/screens/SongDetailsScreen';
 import { LoadingScreen } from './components/ui/LoadingScreen';
 import { OnboardingOverlay } from './components/ui/OnboardingOverlay';
 import { MetadataDebugger } from './components/debug/MetadataDebugger';
@@ -35,6 +36,7 @@ function App() {
   const [songName, setSongName] = useState<string>("");
   const [currentSongId, setCurrentSongId] = useState<string | null>(null); 
   const [editingSong, setEditingSong] = useState<SavedSong | null>(null);
+  const [detailSong, setDetailSong] = useState<SavedSong | null>(null); // New: Song being viewed in Details
 
   const [countdown, setCountdown] = useState(3);
   const [isSongLoading, setIsSongLoading] = useState(false);
@@ -96,7 +98,8 @@ function App() {
     errorMessage, setErrorMessage, onFileSelect, handleCreateBeatmap,
     selectedLaneCount, setSelectedLaneCount, selectedPlayStyle, setSelectedPlayStyle,
     selectedDifficulty, setSelectedDifficulty, aiOptions, setAiOptions,
-    beatmapFeatures, setBeatmapFeatures, skipAI, setSkipAI
+    beatmapFeatures, setBeatmapFeatures, skipAI, setSkipAI,
+    errorState, resetError
   } = useSongGenerator(
       customApiKey || process.env.API_KEY || "", 
       isDebugMode, 
@@ -227,7 +230,12 @@ function App() {
       setActiveModifiers(newMods);
   };
 
-  const handleSelectSong = async (song: SavedSong) => {
+  const handleSelectSong = (song: SavedSong) => {
+      setDetailSong(song);
+      setStatus(GameStatus.Details);
+  };
+
+  const handleStartGameLoad = async (song: SavedSong) => {
       setIsSongLoading(true);
       setCurrentSongId(song.id);
       setActiveModifiers(new Set()); // Reset mods on song change
@@ -352,6 +360,7 @@ function App() {
     setLoadingSubText("");
     setErrorMessage(null);
     setPauseRequestTime(0);
+    setDetailSong(null);
   };
 
   const MODS_LIST = [
@@ -373,7 +382,7 @@ function App() {
   }
 
   return (
-    <div className="h-[100dvh] w-full flex flex-col transition-colors duration-1000 font-sans text-white select-none relative overflow-hidden" style={{ background: status === GameStatus.Library ? '#030304' : `radial-gradient(circle at center, ${theme.secondaryColor}22 0%, #030304 100%)` }}>
+    <div className="h-[100dvh] w-full flex flex-col transition-colors duration-1000 font-sans text-white select-none relative overflow-hidden" style={{ background: (status === GameStatus.Library || status === GameStatus.Details) ? '#030304' : `radial-gradient(circle at center, ${theme.secondaryColor}22 0%, #030304 100%)` }}>
       
       {/* Modals & Overlays */}
       {showOnboarding && <OnboardingOverlay onComplete={completeOnboarding} />}
@@ -391,6 +400,8 @@ function App() {
             difficulty={selectedDifficulty} setDifficulty={setSelectedDifficulty}
             features={beatmapFeatures} setFeatures={setBeatmapFeatures}
             isDebugMode={isDebugMode} skipAI={skipAI} setSkipAI={setSkipAI}
+            aiOptions={aiOptions} setAiOptions={setAiOptions}
+            errorState={errorState} resetError={resetError}
         />
       )}
       
@@ -432,6 +443,15 @@ function App() {
             />
         )}
 
+        {status === GameStatus.Details && detailSong && (
+            <SongDetailsScreen 
+                song={detailSong}
+                onBack={backToLibrary}
+                onStart={handleStartGameLoad}
+                onEdit={handleEditSong}
+            />
+        )}
+
         {status === GameStatus.Editing && editingSong && (
             <EditorScreen 
                 song={editingSong} 
@@ -442,7 +462,7 @@ function App() {
         )}
 
         {status === GameStatus.Ready && (
-          <div className="fixed inset-0 z-50 bg-[#0a0a0a] flex flex-col">
+          <div className="fixed inset-0 z-50 bg-[#0a0a0a] flex flex-col animate-fade-in">
              <div className="absolute inset-0 overflow-hidden pointer-events-none">
                  <div className="absolute inset-0 opacity-20 blur-[120px]" style={{ background: `radial-gradient(circle at top center, ${theme.primaryColor}, transparent 60%)` }}></div>
                  <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20"></div>
@@ -450,7 +470,7 @@ function App() {
              
              {/* Ready Screen Header */}
              <div className="relative z-50 flex justify-between items-center p-6 w-full shrink-0">
-                <button onClick={backToLibrary} className="group flex items-center justify-center w-12 h-12 rounded-full bg-white/5 border border-white/5 backdrop-blur-md hover:bg-white/10 active:scale-95 transition-all"><ArrowLeft className="w-6 h-6 text-white group-hover:-translate-x-1 transition-transform" /></button>
+                <button onClick={() => setStatus(GameStatus.Details)} className="group flex items-center justify-center w-12 h-12 rounded-full bg-white/5 border border-white/5 backdrop-blur-md hover:bg-white/10 active:scale-95 transition-all"><ArrowLeft className="w-6 h-6 text-white group-hover:-translate-x-1 transition-transform" /></button>
                 <div className="px-3 py-1 rounded-full bg-white/5 border border-white/5 backdrop-blur-md text-[10px] font-bold uppercase tracking-[0.2em] text-gray-500">任务简报</div>
                 <div className="w-12"></div>
              </div>
@@ -629,7 +649,7 @@ function App() {
         <ResultScreen status={status} score={score} notesCount={notes.length} songName={songName} onReset={backToLibrary} onReplay={restartGame} />
       </main>
 
-      {status !== GameStatus.Playing && status !== GameStatus.Countdown && status !== GameStatus.Paused && status !== GameStatus.Editing && (
+      {status !== GameStatus.Playing && status !== GameStatus.Countdown && status !== GameStatus.Paused && status !== GameStatus.Editing && status !== GameStatus.Details && (
           <Footer isDebugMode={isDebugMode} onClick={handleVersionClick} />
       )}
     </div>

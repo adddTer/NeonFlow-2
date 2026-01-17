@@ -11,7 +11,7 @@ type WorkerMessage = {
         fullData: Float32Array;
         sampleRate: number;
         structure: SongStructure;
-        difficulty: BeatmapDifficulty;
+        difficulty: number; // Changed from BeatmapDifficulty enum to number
         laneCount: LaneCount;
         playStyle: PlayStyle;
         features: BeatmapFeatures;

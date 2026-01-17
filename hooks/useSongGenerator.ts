@@ -22,39 +22,46 @@ export const useSongGenerator = (
     isDebugMode: boolean, 
     apiKeyStatus: string,
     onSuccess: () => void,
-    onError?: (errorType: string) => void
+    onError?: (errorType: string, message?: string) => void
 ) => {
     const [pendingFile, setPendingFile] = useState<File | null>(null);
     const [isConfiguringSong, setIsConfiguringSong] = useState(false);
     const [loadingStage, setLoadingStage] = useState<string>(""); 
     const [loadingSubText, setLoadingSubText] = useState<string>("");
-    const [loadingProgress, setLoadingProgress] = useState<number>(0); // NEW: Numeric Progress
+    const [loadingProgress, setLoadingProgress] = useState<number>(0); 
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     
+    // Updated to accept number (1-20) or null
     const [selectedLaneCount, setSelectedLaneCount] = useState<LaneCount>(4);
     const [selectedPlayStyle, setSelectedPlayStyle] = useState<PlayStyle>('THUMB');
-    const [selectedDifficulty, setSelectedDifficulty] = useState<BeatmapDifficulty | null>(null);
+    const [selectedDifficulty, setSelectedDifficulty] = useState<number | null>(null);
     const [aiOptions, setAiOptions] = useState<GenerationOptions>({ structure: true, theme: true, metadata: true });
     const [beatmapFeatures, setBeatmapFeatures] = useState({ normal: true, holds: true, catch: true });
     const [skipAI, setSkipAI] = useState(false);
+    
+    // New Error State for Modal
+    const [errorState, setErrorState] = useState<{ hasError: boolean, type: string, message: string | null }>({ hasError: false, type: '', message: null });
 
     const onFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (!file) return;
         setPendingFile(file);
-        setSelectedDifficulty(null); 
+        setSelectedDifficulty(10); // Default to 10
         setIsConfiguringSong(true); 
         event.target.value = '';
     };
+    
+    const resetError = () => setErrorState({ hasError: false, type: '', message: null });
 
     const handleCreateBeatmap = async (options?: { empty?: boolean }) => {
         if (!pendingFile) return;
         const isEmptyMode = options?.empty === true;
-        if (!isEmptyMode && !selectedDifficulty) return;
+        if (!isEmptyMode && selectedDifficulty === null) return;
         
-        setIsConfiguringSong(false);
+        setIsConfiguringSong(false); 
+        
         const file = pendingFile;
-        setPendingFile(null);
+        // Do NOT nullify pendingFile yet in case we need to retry
         setErrorMessage(null);
         setLoadingProgress(0);
 
@@ -71,17 +78,17 @@ export const useSongGenerator = (
             const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ latencyHint: 'interactive' });
             
             setLoadingSubText("解码音频流...");
-            setLoadingProgress(15);
+            setLoadingProgress(10);
             const decodedBuffer = await audioContext.decodeAudioData(audioCtxBuffer);
             
             setLoadingStage("音频特征提取");
             setLoadingSubText("分离低频与动态范围分析...");
-            setLoadingProgress(30);
+            setLoadingProgress(15);
             const { lowData, fullData } = await preprocessAudioData(decodedBuffer);
             
             setLoadingSubText("提取元数据与封面...");
             const coverArt = await extractCoverArt(file);
-            setLoadingProgress(40);
+            setLoadingProgress(20);
 
             let structure;
             let aiTheme = DEFAULT_THEME;
@@ -93,7 +100,7 @@ export const useSongGenerator = (
             if (shouldUseFallback) {
                 setLoadingStage(isEmptyMode ? "创建工程" : "基础分析");
                 setLoadingSubText("应用默认结构配置...");
-                setLoadingProgress(60);
+                setLoadingProgress(40);
                 await new Promise(resolve => setTimeout(resolve, 300));
                 
                 structure = { bpm: 120, sections: [{ startTime: 0, endTime: decodedBuffer.duration, type: 'verse', intensity: 0.8, style: 'stream' }] };
@@ -101,7 +108,8 @@ export const useSongGenerator = (
             } else {
                 setLoadingStage("云端智能分析");
                 setLoadingSubText("识别音乐结构、BPM与情感色彩...");
-                setLoadingProgress(50);
+                // AI Start: 20%. AI End: 80%. Allocating majority of bar to the slow part.
+                setLoadingProgress(25);
                 
                 if (apiKeyStatus === 'valid' && apiKey) {
                     const base64String = await fileUtils_fileToBase64(file);
@@ -111,7 +119,7 @@ export const useSongGenerator = (
                     structure = aiResult.structure;
                     aiTheme = aiResult.theme;
                     aiMetadata = aiResult.metadata;
-                    setLoadingProgress(75);
+                    setLoadingProgress(80);
                 } else {
                     throw new Error("API Key Missing");
                 }
@@ -122,8 +130,8 @@ export const useSongGenerator = (
 
             if (!isEmptyMode) {
                 setLoadingStage("谱面生成中");
-                setLoadingSubText(`基于 ${selectedDifficulty} 难度构建 ${selectedLaneCount}K 键位...`);
-                setLoadingProgress(80);
+                setLoadingSubText(`基于难度 ${selectedDifficulty} 构建 ${selectedLaneCount}K 键位...`);
+                setLoadingProgress(85);
                 await new Promise(resolve => setTimeout(resolve, 50));
 
                 const onsets = computeOnsets(lowData, fullData, decodedBuffer.sampleRate);
@@ -133,7 +141,7 @@ export const useSongGenerator = (
                 finalNotes = generateBeatmap(
                     onsets,
                     structure,
-                    selectedDifficulty!,
+                    selectedDifficulty!, // Now passing number directly
                     selectedLaneCount,
                     selectedPlayStyle,
                     beatmapFeatures
@@ -167,7 +175,7 @@ export const useSongGenerator = (
                 structure: structure as any,
                 theme: aiTheme,
                 difficultyRating: rating,
-                laneCount: (!selectedDifficulty || selectedDifficulty === BeatmapDifficulty.Titan) ? 6 : selectedLaneCount
+                laneCount: selectedLaneCount
             };
 
             await saveSong(newSong);
@@ -175,6 +183,7 @@ export const useSongGenerator = (
             
             // Short delay to show 100%
             await new Promise(resolve => setTimeout(resolve, 200));
+            setPendingFile(null); // Clear file only on success
             onSuccess(); 
             
             setLoadingStage("");
@@ -188,17 +197,26 @@ export const useSongGenerator = (
             setLoadingSubText("");
             setLoadingProgress(0);
             
+            // Re-open config modal with error state
+            setIsConfiguringSong(true);
+            
+            let type = 'UNKNOWN';
+            let msg = error.message;
+
             if (error.message && error.message.includes("GenerativeFailure")) {
-                setErrorMessage("生成失败：无法提取有效节奏。");
-                return { success: false, error: 'GEN_FAIL' };
+                type = 'GEN_FAIL';
+                msg = "无法从音频中提取有效节奏，文件可能过于安静或格式不支持。";
             } else if (error.message === "API Key Missing" || error.message.includes("403") || error.message.includes("401")) {
-                setErrorMessage("生成失败：API Key 无效或未配置。");
+                type = 'API_KEY_MISSING';
+                msg = "Gemini API 调用失败。可能是 Key 无效、额度不足或网络问题。";
                 if (onError) onError('API_KEY_MISSING');
-                return { success: false, error: 'API_KEY_MISSING' };
-            } else {
-                setErrorMessage("导入出错，请检查文件格式。" + error.message);
-                return { success: false, error: 'UNKNOWN' };
+            } else if (error.message.includes("503") || error.message.includes("Overloaded")) {
+                type = 'API_OVERLOAD';
+                msg = "AI 服务繁忙，请稍后重试或使用纯算法模式。";
             }
+
+            setErrorState({ hasError: true, type, message: msg });
+            return { success: false, error: type };
         }
     };
 
@@ -207,7 +225,7 @@ export const useSongGenerator = (
         isConfiguringSong, setIsConfiguringSong,
         loadingStage, setLoadingStage,
         loadingSubText, setLoadingSubText,
-        loadingProgress, setLoadingProgress, // Exported
+        loadingProgress, setLoadingProgress,
         errorMessage, setErrorMessage,
         onFileSelect,
         handleCreateBeatmap,
@@ -216,6 +234,7 @@ export const useSongGenerator = (
         selectedDifficulty, setSelectedDifficulty,
         aiOptions, setAiOptions,
         beatmapFeatures, setBeatmapFeatures,
-        skipAI, setSkipAI
+        skipAI, setSkipAI,
+        errorState, resetError // New exports
     };
 };

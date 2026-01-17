@@ -4,7 +4,6 @@ import { Upload, Trash2, Download, CheckSquare, Music, Clock, Zap, Plus, Trophy,
 import { SavedSong } from '../../types';
 import { deleteSong, updateSongMetadata, exportSongAsZip, toggleFavorite } from '../../services/storageService';
 import { calculateAccuracy, calculateRating } from '../../utils/scoring';
-import { SongDetailsModal } from '../library/SongDetailsModal';
 
 const formatTime = (seconds: number) => {
   const m = Math.floor(seconds / 60);
@@ -55,7 +54,6 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
   const [filterFavorites, setFilterFavorites] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const [showDetailsId, setShowDetailsId] = useState<string | null>(null);
   const [showExportModal, setShowExportModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [includeHistory, setIncludeHistory] = useState(true);
@@ -197,8 +195,6 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
     }
   };
 
-  const detailSong = songs.find(s => s.id === showDetailsId);
-
   return (
     <div className="w-full h-full flex flex-col relative overflow-hidden bg-[#030304]">
       
@@ -312,7 +308,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar px-4 md:px-6 pb-24">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6">
               {processedSongs.map(song => {
                   const levelInfo = (song as any)._displayLevel || getLevelDisplay(song.difficultyRating);
                   const secondaryColor = song.theme?.secondaryColor || '#222';
@@ -321,18 +317,28 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
                       <div 
                          key={song.id}
                          onClick={(e) => isSelectionMode ? toggleSelection(song.id, e) : onSelectSong(song)}
-                         className={`group relative aspect-[4/3] rounded-3xl overflow-hidden border transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl cursor-pointer bg-[#0a0a0a] transform-gpu
-                            ${selectedIds.has(song.id) ? 'border-neon-blue ring-2 ring-neon-blue/50' : 'border-white/5 hover:border-white/20'}
+                         className={`group relative aspect-[4/3] rounded-3xl overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl cursor-pointer bg-[#0a0a0a]
+                            ${selectedIds.has(song.id) ? 'ring-2 ring-neon-blue/50' : ''}
                          `}
-                         style={{ isolation: 'isolate' }}
+                         // Fix: Use webkit-mask-image to force clipping of transformed child
+                         style={{ 
+                             isolation: 'isolate', 
+                             WebkitMaskImage: '-webkit-radial-gradient(white, black)'
+                         }}
                       >
+                         {/* Border Overlay: sits on top, does not transform, covers anti-aliased edges */}
+                         <div className={`absolute inset-0 rounded-3xl border pointer-events-none z-20 transition-colors duration-300
+                             ${selectedIds.has(song.id) ? 'border-neon-blue' : 'border-white/5 group-hover:border-white/20'}
+                         `}></div>
+
                          <div className="absolute inset-0 z-0 bg-black">
                              {song.coverArt ? (
                                 <>
                                     <img 
                                         src={song.coverArt} 
                                         alt="cover" 
-                                        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
+                                        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                                        style={{ willChange: 'transform', backfaceVisibility: 'hidden' }}
                                     />
                                     <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent pointer-events-none"></div>
                                 </>
@@ -354,40 +360,19 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
                          
                          <div className="absolute inset-0 z-10 pointer-events-none p-5 flex flex-col justify-between">
                              <div className="flex justify-between items-start">
-                                 <div className="flex flex-col items-center">
-                                     <div 
-                                        className="w-12 h-12 rounded-xl flex items-center justify-center backdrop-blur-md border border-white/10 shadow-lg bg-black/40"
-                                        style={{ borderColor: levelInfo.color }}
-                                     >
-                                         <span className="font-black italic text-xl text-white drop-shadow-md" style={{ color: levelInfo.color }}>{levelInfo.val}</span>
-                                     </div>
-                                 </div>
-
-                                 {!isSelectionMode && (
-                                     <div className="flex gap-2 pointer-events-auto items-start">
-                                         {song.bestResult && (
-                                             <div className={`px-2 py-1 rounded-lg backdrop-blur-md border border-white/10 bg-black/60 flex flex-col items-center shadow-lg ${song.bestResult.rank === 'S+' || song.bestResult.rank === 'SS' || song.bestResult.rank === 'OPUS' ? 'border-neon-blue/30' : ''}`}>
-                                                 <span className={`text-xl font-black italic leading-none ${song.bestResult.rank === 'S+' || song.bestResult.rank === 'SS' || song.bestResult.rank === 'OPUS' ? 'text-neon-blue drop-shadow-[0_0_8px_rgba(0,243,255,0.5)]' : 'text-white'}`}>
-                                                     {song.bestResult.rank}
-                                                 </span>
-                                             </div>
-                                         )}
-
-                                         <button 
-                                            onClick={(e) => handleToggleFavorite(song.id, e)}
-                                            className={`p-2 backdrop-blur-md rounded-lg border transition-all ${song.isFavorite ? 'bg-neon-pink/20 border-neon-pink text-neon-pink' : 'bg-black/40 border-white/5 text-white hover:bg-white/20 opacity-0 group-hover:opacity-100'}`}
+                                 {/* Left: Level Badge & Buttons */}
+                                 <div className="flex items-start gap-2">
+                                     <div className="flex flex-col items-center">
+                                         <div 
+                                            className="w-12 h-12 rounded-xl flex items-center justify-center backdrop-blur-md border border-white/10 shadow-lg bg-black/40"
+                                            style={{ borderColor: levelInfo.color }}
                                          >
-                                             <Heart className={`w-4 h-4 ${song.isFavorite ? 'fill-current' : ''}`} />
-                                         </button>
+                                             <span className="font-black italic text-xl text-white drop-shadow-md" style={{ color: levelInfo.color }}>{levelInfo.val}</span>
+                                         </div>
+                                     </div>
 
-                                         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
-                                             <button 
-                                                onClick={(e) => { e.stopPropagation(); setShowDetailsId(song.id); }}
-                                                className="p-2 bg-black/40 backdrop-blur-md rounded-lg text-white hover:bg-white/20 border border-white/5"
-                                                title="详情"
-                                             >
-                                                 <Info className="w-4 h-4" />
-                                             </button>
+                                     {!isSelectionMode && (
+                                         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-2 pointer-events-auto mt-1">
                                              <button 
                                                 onClick={(e) => startEdit(song, e)}
                                                 className="p-2 bg-black/40 backdrop-blur-md rounded-lg text-white hover:bg-white/20 border border-white/5"
@@ -395,152 +380,80 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
                                              >
                                                  <Type className="w-4 h-4" />
                                              </button>
+                                             <button 
+                                                onClick={(e) => handleToggleFavorite(song.id, e)}
+                                                className={`p-2 backdrop-blur-md rounded-lg border transition-all ${song.isFavorite ? 'bg-neon-pink/20 border-neon-pink text-neon-pink' : 'bg-black/40 border-white/5 text-white hover:bg-white/20'}`}
+                                             >
+                                                 <Heart className={`w-4 h-4 ${song.isFavorite ? 'fill-current' : ''}`} />
+                                             </button>
                                          </div>
-                                     </div>
-                                 )}
-                                 
-                                 {isSelectionMode && (
+                                     )}
+                                 </div>
+
+                                 {/* Right: Best Result (Isolated) */}
+                                 {!isSelectionMode && song.bestResult && (
                                      <div className="pointer-events-auto">
-                                         <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-colors ${selectedIds.has(song.id) ? 'bg-neon-blue border-neon-blue text-black' : 'border-white/30 bg-black/40'}`}>
-                                             {selectedIds.has(song.id) && <CheckSquare className="w-4 h-4" />}
+                                         <div className={`px-2 py-1 rounded-lg backdrop-blur-md border border-white/10 bg-black/60 flex flex-col items-center shadow-lg ${song.bestResult.rank === 'S+' || song.bestResult.rank === 'SS' || song.bestResult.rank === 'OPUS' ? 'border-neon-blue/30' : ''}`}>
+                                             <span className={`text-xl font-black italic drop-shadow-md ${song.bestResult.rank === 'φ' ? 'text-cyan-200' : 'text-white'}`}>
+                                                 {song.bestResult.rank}
+                                             </span>
+                                             <span className="text-[8px] font-bold text-gray-400">
+                                                 {Math.floor(song.bestResult.score / 10000)}W
+                                             </span>
                                          </div>
                                      </div>
                                  )}
                              </div>
 
-                             <div className="pointer-events-auto">
-                                 {editingId === song.id ? (
-                                      <div className="flex flex-col gap-2 bg-black/80 p-2 rounded-xl backdrop-blur-md" onClick={e => e.stopPropagation()}>
-                                          <input 
-                                            className="bg-transparent border-b border-white/20 text-white font-bold text-lg outline-none"
-                                            value={editForm.title}
-                                            onChange={e => setEditForm({...editForm, title: e.target.value})}
-                                            autoFocus
-                                          />
-                                          <div className="flex gap-2">
-                                              <input 
-                                                className="flex-1 bg-transparent border-b border-white/20 text-gray-400 text-xs outline-none"
-                                                value={editForm.artist}
-                                                onChange={e => setEditForm({...editForm, artist: e.target.value})}
-                                              />
-                                              <button onClick={saveEdit} className="text-xs bg-neon-blue text-black px-2 rounded font-bold">SAVE</button>
-                                          </div>
-                                      </div>
-                                 ) : (
-                                     <>
-                                        <h3 className="text-xl font-black text-white leading-tight truncate drop-shadow-md mb-1">{song.title}</h3>
-                                        <p className="text-xs text-white/70 font-bold uppercase tracking-wider mb-3 truncate">{song.artist}</p>
-                                        
-                                        {song.bestResult ? (
-                                            <div className="flex items-center gap-3 text-[10px] font-bold uppercase tracking-widest bg-black/30 w-fit px-2 py-1 rounded-lg backdrop-blur-sm border border-white/5">
-                                                <span className="text-white flex items-center gap-1">
-                                                    <Trophy className="w-3 h-3 text-yellow-500" />
-                                                    {(song.bestResult.score / 10000).toFixed(0)}万
-                                                </span>
-                                                <span className="w-1 h-1 bg-white/20 rounded-full"></span>
-                                                <span className="text-neon-blue">{calculateAccuracy(song.bestResult.perfect, song.bestResult.good, song.notes.length)}%</span>
-                                            </div>
-                                        ) : (
-                                            <div className="flex items-center gap-3 text-[10px] font-bold text-white/50 uppercase tracking-widest">
-                                                <span className="flex items-center gap-1"><Clock className="w-3 h-3"/> {formatTime(song.duration)}</span>
-                                                <span className="w-1 h-1 bg-white/20 rounded-full"></span>
-                                                <span>{Math.round(song.structure.bpm)} BPM</span>
-                                                <span className="w-1 h-1 bg-white/20 rounded-full"></span>
-                                                <span className={`${song.laneCount === 6 ? 'text-purple-400' : 'text-neon-blue'}`}>{song.laneCount}K</span>
-                                            </div>
-                                        )}
-                                     </>
-                                 )}
+                             <div>
+                                 <h3 className="text-xl font-black text-white leading-tight drop-shadow-md line-clamp-2 mb-1">{song.title}</h3>
+                                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wider truncate">{song.artist}</p>
                              </div>
                          </div>
                       </div>
                   );
               })}
           </div>
-          
-          {processedSongs.length === 0 && (
-              <div className="h-64 flex flex-col items-center justify-center text-gray-500 opacity-60 gap-4">
-                  <div className="relative">
-                      <Disc className="w-16 h-16 animate-spin-slow" />
-                      <Music className="w-6 h-6 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
-                  </div>
-                  <div className="text-center">
-                      <p className="text-lg font-bold text-white">曲库为空</p>
-                      <p className="text-sm">导入音乐开始创作</p>
-                  </div>
-              </div>
-          )}
       </div>
 
-      <input ref={audioInputRef} type="file" accept="audio/*" onChange={onImportAudioClick} className="hidden" />
-      <input ref={mapInputRef} type="file" multiple accept=".json,.zip,.nfz,application/json,application/zip,application/octet-stream" onChange={onImportMapClick} className="hidden" />
+      {/* Hidden File Inputs */}
+      <input type="file" ref={audioInputRef} className="hidden" accept="audio/*,.flac" onChange={onImportAudioClick} />
+      <input type="file" ref={mapInputRef} className="hidden" accept=".json,.nfz" multiple onChange={onImportMapClick} />
 
-      {detailSong && (
-          <SongDetailsModal 
-            song={detailSong} 
-            onClose={() => setShowDetailsId(null)} 
-            onStart={(s) => { onSelectSong(s); setShowDetailsId(null); }} 
-            onEdit={(s) => { onEditSong(s); setShowDetailsId(null); }} 
-          />
-      )}
-
+      {/* Modals */}
       {showExportModal && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
               <div className="bg-[#0f172a] border border-white/20 rounded-2xl p-6 w-full max-w-sm shadow-2xl relative">
-                  <button onClick={() => !isExporting && setShowExportModal(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white disabled:opacity-50">
-                      <X className="w-5 h-5" />
-                  </button>
-                  <h2 className="text-xl font-bold text-white mb-4">导出选项</h2>
-                  <p className="text-gray-400 text-sm mb-6">即将导出 {selectedIds.size} 首曲目。</p>
-                  
-                  <label className="flex items-center gap-3 p-4 bg-white/5 rounded-xl border border-white/10 cursor-pointer hover:bg-white/10 transition-colors mb-6">
-                      <div className={`w-5 h-5 rounded border flex items-center justify-center ${includeHistory ? 'bg-neon-blue border-neon-blue text-black' : 'border-gray-500'}`}>
-                          {includeHistory && <CheckSquare className="w-3.5 h-3.5" />}
-                      </div>
-                      <input type="checkbox" className="hidden" checked={includeHistory} onChange={e => setIncludeHistory(e.target.checked)} />
-                      <div className="flex flex-col">
-                          <span className="font-bold text-sm">包含历史成绩</span>
-                          <span className="text-xs text-gray-500">导出的文件中将保留您的最高分记录</span>
-                      </div>
-                  </label>
-
-                  <button 
-                    onClick={handleExportConfirm} 
-                    disabled={isExporting}
-                    className="w-full py-3 bg-neon-blue text-black font-bold rounded-xl hover:bg-white transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                  >
-                      {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                      {isExporting ? '正在打包...' : '开始导出'}
-                  </button>
+                  <h3 className="text-xl font-black text-white mb-4 flex items-center gap-2"><Download className="w-5 h-5 text-neon-blue"/> 导出乐谱</h3>
+                  <div className="mb-6">
+                      <p className="text-sm text-gray-300 mb-4">即将导出 {selectedIds.size} 首乐谱。</p>
+                      <label className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition">
+                          <input type="checkbox" checked={includeHistory} onChange={e => setIncludeHistory(e.target.checked)} className="w-4 h-4 accent-neon-blue" />
+                          <span className="text-sm font-bold text-gray-300">包含历史最佳成绩</span>
+                      </label>
+                  </div>
+                  <div className="flex gap-3">
+                      <button onClick={() => setShowExportModal(false)} className="flex-1 py-3 bg-white/10 rounded-xl font-bold hover:bg-white/20 transition-colors text-sm">取消</button>
+                      <button onClick={handleExportConfirm} disabled={isExporting} className="flex-1 py-3 bg-neon-blue rounded-xl font-bold hover:bg-white hover:text-black text-black shadow-lg transition-colors text-sm flex items-center justify-center gap-2">
+                          {isExporting && <Loader2 className="w-4 h-4 animate-spin"/>}
+                          确认导出
+                      </button>
+                  </div>
               </div>
           </div>
       )}
 
       {showDeleteConfirm && (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
               <div className="bg-[#0f172a] border border-red-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl relative">
-                  <div className="flex items-center gap-3 text-red-400 font-black text-xl mb-4">
-                      <AlertTriangle className="w-6 h-6" />
-                      确认删除
-                  </div>
-                  <p className="text-gray-300 text-sm mb-6 leading-relaxed">
-                      您确定要删除选中的 <span className="text-white font-bold">{selectedIds.size}</span> 首曲目吗？<br/>
-                      此操作<span className="text-red-400 font-bold">无法撤销</span>。
+                  <h3 className="text-xl font-black text-red-400 mb-4 flex items-center gap-2"><AlertTriangle className="w-5 h-5"/> 确认删除</h3>
+                  <p className="text-sm text-gray-300 mb-6">
+                      确定要删除选中的 {selectedIds.size} 首乐谱吗？<br/>
+                      <span className="text-xs text-gray-500 mt-2 block">此操作无法撤销。</span>
                   </p>
-                  
-                  <div className="grid grid-cols-2 gap-3">
-                      <button 
-                        onClick={() => setShowDeleteConfirm(false)}
-                        className="py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold transition-colors"
-                      >
-                          取消
-                      </button>
-                      <button 
-                        onClick={confirmDelete}
-                        className="py-3 rounded-xl bg-red-500 text-white font-bold hover:bg-red-600 transition-colors shadow-lg"
-                      >
-                          删除
-                      </button>
+                  <div className="flex gap-3">
+                      <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 py-3 bg-white/10 rounded-xl font-bold hover:bg-white/20 transition-colors text-sm">取消</button>
+                      <button onClick={confirmDelete} className="flex-1 py-3 bg-red-500 rounded-xl font-bold hover:bg-red-600 text-white shadow-lg transition-colors text-sm">删除</button>
                   </div>
               </div>
           </div>

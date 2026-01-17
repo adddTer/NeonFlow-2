@@ -117,13 +117,14 @@ export interface GameConfig {
 
 export enum GameStatus {
   Library = 'LIBRARY', 
+  Details = 'DETAILS', // NEW: Standalone details screen
   Analyzing = 'ANALYZING',
   Ready = 'READY', 
   Countdown = 'COUNTDOWN',
   Playing = 'PLAYING',
   Paused = 'PAUSED',
   Finished = 'FINISHED',
-  Editing = 'EDITING', // NEW
+  Editing = 'EDITING', 
 }
 
 export interface ScoreState {
