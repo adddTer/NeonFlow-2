@@ -1,8 +1,9 @@
 
 import React, { useState } from 'react';
-import { preprocessAudioData, computeOnsets } from '../utils/audioAnalyzer';
+import { preprocessAudioData, computeOnsets, estimateBPM } from '../utils/audioAnalyzer';
 import { generateBeatmap } from '../utils/beatmapGenerator';
 import { analyzeStructureWithGemini, GenerationOptions } from '../services/geminiService';
+import { analyzeMetadataWithGemini, MetadataResult } from '../services/metadataService';
 import { saveSong } from '../services/storageService';
 import { extractCoverArt } from '../utils/audioMetadata';
 import { fileToBase64 } from '../utils/fileUtils'; 
@@ -31,24 +32,22 @@ export const useSongGenerator = (
     const [loadingProgress, setLoadingProgress] = useState<number>(0); 
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     
-    // Updated to accept number (1-20) or null
     const [selectedLaneCount, setSelectedLaneCount] = useState<LaneCount>(4);
     const [selectedPlayStyle, setSelectedPlayStyle] = useState<PlayStyle>('THUMB');
     const [selectedDifficulty, setSelectedDifficulty] = useState<number | null>(null);
-    const [aiOptions, setAiOptions] = useState<GenerationOptions>({ structure: true, theme: true, metadata: true });
+    const [aiOptions, setAiOptions] = useState<GenerationOptions>({}); 
     const [beatmapFeatures, setBeatmapFeatures] = useState({ normal: true, holds: true, catch: true });
     const [skipAI, setSkipAI] = useState(false);
     const [useProModel, setUseProModel] = useState(false);
     
-    // New Error State for Modal
     const [errorState, setErrorState] = useState<{ hasError: boolean, type: string, message: string | null }>({ hasError: false, type: '', message: null });
 
     const onFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (!file) return;
         setPendingFile(file);
-        setSelectedDifficulty(10); // Default to 10
-        setUseProModel(false); // Reset to Flash by default
+        setSelectedDifficulty(10); 
+        setUseProModel(false);
         setIsConfiguringSong(true); 
         event.target.value = '';
     };
@@ -63,7 +62,6 @@ export const useSongGenerator = (
         setIsConfiguringSong(false); 
         
         const file = pendingFile;
-        // Do NOT nullify pendingFile yet in case we need to retry
         setErrorMessage(null);
         setLoadingProgress(0);
 
@@ -88,13 +86,18 @@ export const useSongGenerator = (
             setLoadingProgress(15);
             const { lowData, fullData } = await preprocessAudioData(decodedBuffer);
             
-            setLoadingSubText("提取元数据与封面...");
+            // --- Programmatic BPM Estimation ---
+            setLoadingSubText("程序化测算 BPM...");
+            const onsets = computeOnsets(lowData, fullData, decodedBuffer.sampleRate);
+            const dspBpm = estimateBPM(onsets);
+            
+            setLoadingSubText("提取封面...");
             const coverArt = await extractCoverArt(file);
             setLoadingProgress(20);
 
             let structure;
             let aiTheme = DEFAULT_THEME;
-            let aiMetadata: { title?: string, artist?: string, album?: string } | undefined;
+            let aiMetadata: MetadataResult | undefined;
 
             const isDebugAndNoKey = isDebugMode && apiKeyStatus !== 'valid';
             const shouldUseFallback = (skipAI) || isDebugAndNoKey; 
@@ -105,49 +108,51 @@ export const useSongGenerator = (
                 setLoadingProgress(40);
                 await new Promise(resolve => setTimeout(resolve, 300));
                 
-                structure = { bpm: 120, sections: [{ startTime: 0, endTime: decodedBuffer.duration, type: 'verse', intensity: 0.8, style: 'stream' }] };
-                aiMetadata = { title: file.name.replace(/\.[^/.]+$/, ""), artist: "Unknown Artist" };
+                structure = { bpm: dspBpm, sections: [{ startTime: 0, endTime: decodedBuffer.duration, type: 'verse', intensity: 0.8, style: 'stream' }] };
+                aiMetadata = { 
+                    title: file.name.replace(/\.[^/.]+$/, ""), 
+                    artist: "Unknown Artist", 
+                    bpm: dspBpm, 
+                    theme: DEFAULT_THEME 
+                };
             } else {
                 
                 if (apiKeyStatus === 'valid' && apiKey) {
                     const base64String = await fileUtils_fileToBase64(file);
                     const base64Data = base64String.split(',')[1];
                     
-                    // Selected Model Logic: Metadata ALWAYS uses Flash. Structure uses selection.
-                    const metaModel = 'gemini-3-flash-preview';
                     const structureModel = useProModel ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
 
-                    // --- Phase 1: Metadata Analysis ---
+                    // --- Phase 1: Metadata, Theme, BPM (Using DSP as Hint) ---
                     setLoadingStage("智能分析 (1/2)");
-                    setLoadingSubText("正在检索歌曲信息 (Flash)...");
+                    setLoadingSubText("正在检索元数据与主题 (Google Search)...");
                     setLoadingProgress(30);
                     
-                    // Call for Metadata Only
-                    const metaResult = await analyzeStructureWithGemini(file.name, base64Data, file.type, apiKey, {
-                        ...aiOptions,
-                        structure: false,
-                        theme: false,
-                        metadata: true,
-                        modelOverride: metaModel // Always Flash
-                    });
-                    aiMetadata = metaResult.metadata;
+                    aiMetadata = await analyzeMetadataWithGemini(
+                        file.name, 
+                        base64Data, 
+                        file.type, 
+                        dspBpm, // Pass the programmatic hint
+                        apiKey
+                    );
+                    
+                    aiTheme = aiMetadata.theme; // Theme now comes from Metadata phase
 
-                    // --- Phase 2: Structure Analysis ---
+                    // --- Phase 2: Structure Analysis Only ---
                     setLoadingStage("智能分析 (2/2)");
                     setLoadingSubText(`正在规划谱面结构 (${useProModel ? 'Pro' : 'Flash'})...`);
                     setLoadingProgress(50);
 
-                    // Call for Structure & Theme
-                    const structResult = await analyzeStructureWithGemini(file.name, base64Data, file.type, apiKey, {
+                    const structResult = await analyzeStructureWithGemini(base64Data, file.type, apiKey, {
                         ...aiOptions,
-                        structure: true,
-                        theme: true,
-                        metadata: false,
-                        modelOverride: structureModel // User Selection
+                        modelOverride: structureModel
                     });
                     
-                    structure = structResult.structure;
-                    aiTheme = structResult.theme;
+                    // Combine Phase 1 BPM with Phase 2 Sections
+                    structure = {
+                        bpm: aiMetadata.bpm, 
+                        sections: structResult.sections
+                    };
                     
                     setLoadingProgress(80);
                 } else {
@@ -160,18 +165,19 @@ export const useSongGenerator = (
 
             if (!isEmptyMode) {
                 setLoadingStage("谱面生成中");
-                setLoadingSubText(`基于难度 ${selectedDifficulty} 构建 ${selectedLaneCount}K 键位...`);
+                setLoadingSubText(`基于 BPM ${Math.round(structure.bpm)} 与难度 ${selectedDifficulty} 构建...`);
                 setLoadingProgress(85);
                 await new Promise(resolve => setTimeout(resolve, 50));
 
-                const onsets = computeOnsets(lowData, fullData, decodedBuffer.sampleRate);
+                // Recalculate onsets if needed (usually cached is fine, but cleaner to pass)
+                // We reuse 'onsets' from DSP calculation earlier
                 
                 setLoadingSubText("优化手感与连贯性...");
                 setLoadingProgress(90);
                 finalNotes = generateBeatmap(
                     onsets,
-                    structure,
-                    selectedDifficulty!, // Now passing number directly
+                    structure as any,
+                    selectedDifficulty!, 
                     selectedLaneCount,
                     selectedPlayStyle,
                     beatmapFeatures
@@ -211,9 +217,8 @@ export const useSongGenerator = (
             await saveSong(newSong);
             setLoadingProgress(100);
             
-            // Short delay to show 100%
             await new Promise(resolve => setTimeout(resolve, 200));
-            setPendingFile(null); // Clear file only on success
+            setPendingFile(null); 
             onSuccess(); 
             
             setLoadingStage("");
@@ -226,8 +231,6 @@ export const useSongGenerator = (
             setLoadingStage("");
             setLoadingSubText("");
             setLoadingProgress(0);
-            
-            // Re-open config modal with error state
             setIsConfiguringSong(true);
             
             let type = 'UNKNOWN';

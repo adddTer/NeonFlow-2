@@ -106,7 +106,7 @@ class ErgonomicPhysics {
         this.rightHandStrain = Math.max(0, this.rightHandStrain - decay);
     }
 
-    getCost(targetLanes: number[], currentTime: number, isJackAllowed: boolean, allowOverlap: boolean): number {
+    getCost(targetLanes: number[], currentTime: number, style: string, flow: string, allowOverlap: boolean): number {
         // Forbidden to generate on currently held lanes, unless overlap is explicitly allowed (e.g. Catch notes)
         if (!allowOverlap) {
             for (const lane of targetLanes) {
@@ -121,14 +121,36 @@ class ErgonomicPhysics {
         const prevAvg = this.lastLanes.reduce((a,b)=>a+b,0) / this.lastLanes.length;
         const currAvg = targetLanes.reduce((a,b)=>a+b,0) / targetLanes.length;
         const movement = currAvg - prevAvg;
-        cost += Math.abs(movement) * 1.5;
+        
+        // --- MOVEMENT COST ADJUSTMENT ---
+        // Default penalty for large movements
+        let movementCostMultiplier = 1.5;
+        
+        // If Style is 'jump' or Flow is 'random', we WANT movement and chaos.
+        if (style === 'jump' || flow === 'random') {
+            movementCostMultiplier = 0.5; // Low penalty for movement -> Allows jumps
+        } 
+        // If Style is 'stream', we want small movements (flow)
+        else if (style === 'stream') {
+            movementCostMultiplier = 2.0; // High penalty for large jumps
+        }
+
+        cost += Math.abs(movement) * movementCostMultiplier;
 
         // Flow Break Penalty
         if ((this.lastFlowDirection > 0 && movement > 0) || (this.lastFlowDirection < 0 && movement < 0)) {
-            cost -= 1.0; 
+            // Reward maintaining direction in stream
+            if (style === 'stream' || flow === 'linear') cost -= 1.5;
+        } else {
+             // Changing direction
+             if (style === 'jump' || flow === 'zigzag' || flow === 'random') {
+                 // Reward direction changes for jump/zigzag/random
+                 cost -= 1.0; 
+             }
         }
 
         // Jackhammer Penalty (Repeated Notes)
+        const isJackAllowed = style === 'jump' || flow === 'random';
         for (const lane of targetLanes) {
             if (this.lastLanes.includes(lane)) {
                 if (timeDelta < 0.15 && !isJackAllowed) return 9999; 
@@ -174,7 +196,7 @@ class ErgonomicPhysics {
         this.lastTime = currentTime;
     }
 
-    getBestLanes(count: number, currentTime: number, maxCost: number, style: string, allowOverlap: boolean = false): number[] {
+    getBestLanes(count: number, currentTime: number, maxCost: number, style: string, flow: string, allowOverlap: boolean = false): number[] {
         // Filter out held lanes from candidates ONLY if overlap is NOT allowed
         const allLanes = Array.from({length: this.laneCount}, (_, i) => i)
             .filter(l => allowOverlap || !this.heldLanes.includes(l));
@@ -205,7 +227,7 @@ class ErgonomicPhysics {
         candidates.sort(() => Math.random() - 0.5);
 
         for (const chord of candidates) {
-            const cost = this.getCost(chord, currentTime, style === 'simple', allowOverlap); 
+            const cost = this.getCost(chord, currentTime, style, flow, allowOverlap); 
             if (cost < minCandidateCost) {
                 minCandidateCost = cost;
                 bestCandidate = chord;
@@ -304,7 +326,8 @@ export const generateBeatmap = (
         ) || structure.sections[0];
         
         const desc = currentSection.descriptors || { flow: 'random', hand_bias: 'balanced', focus: 'melody' };
-        
+        const style = currentSection.style || 'stream';
+
         physics.setBias(desc.hand_bias);
         
         // Update held lanes context for physics engine
@@ -316,13 +339,12 @@ export const generateBeatmap = (
         if (desc.special_pattern === 'burst' || desc.special_pattern === 'fill') {
             const beatDur = 60 / structure.bpm;
             // Force generation regardless of threshold if it's a "burst" area
-            // "Burst" = high density, "Fill" = syncopated
             
             let notesToAdd = 1;
             if (desc.special_pattern === 'burst') notesToAdd = 2; // Chord stream
             
             // Bypass minGap check for bursts
-            const lanes = physics.getBestLanes(notesToAdd, onset.time, 9999, 'stream');
+            const lanes = physics.getBestLanes(notesToAdd, onset.time, 9999, 'stream', 'random');
             
             lanes.forEach(lane => {
                 notes.push(createNote(onset.time, lane, 0, 'NORMAL'));
@@ -355,7 +377,8 @@ export const generateBeatmap = (
             Math.random() < config.patternChance &&
             noteIndex + lookAhead < onsets.length;
 
-        if (canPattern) {
+        // Skip pattern library if flow is 'random', we want unique generation via physics
+        if (canPattern && desc.flow !== 'random') {
             const nextOnset = onsets[noteIndex+1];
             const interval = nextOnset.time - onset.time;
             
@@ -366,11 +389,6 @@ export const generateBeatmap = (
                 const len = Math.min(4, onsets.length - noteIndex);
 
                 const r = Math.random();
-                
-                // --- Difficulty-Aware Flow Interpretation ---
-                // If AI said "slide", make it Catch (Slider) regardless of difficulty (AI knows best).
-                // If AI said "linear" (Stairs) and difficulty is LOW, force it to CATCH to be friendly.
-                // If AI said "linear" and difficulty is HIGH, force it to NORMAL (Stream) for challenge.
                 
                 const isExplicitSlide = desc.flow === 'slide' && features.catch;
                 const isLinear = desc.flow === 'linear';
@@ -406,18 +424,11 @@ export const generateBeatmap = (
                     }
                     notesConsumed = len;
                 }
-                else if (desc.flow === 'zigzag' || desc.flow === 'random') {
-                    if (r < 0.4) {
-                        const l1 = Math.floor(Math.random() * laneCount);
-                        let l2 = (l1 + 2) % laneCount; 
-                        generatedPattern = PatternLibrary.getTrill(onset.time, len, interval, l1, l2);
-                    } else if (r < 0.7 || numericDiff < 12) {
-                        notesConsumed = 0;
-                    } else {
-                        const l = Math.floor(Math.random() * laneCount);
-                        generatedPattern = PatternLibrary.getJack(onset.time, len, interval, l);
-                    }
-                    if (generatedPattern.length > 0) notesConsumed = len;
+                else if (desc.flow === 'zigzag') {
+                     const l1 = Math.floor(Math.random() * laneCount);
+                     let l2 = (l1 + 2) % laneCount; 
+                     generatedPattern = PatternLibrary.getTrill(onset.time, len, interval, l1, l2);
+                     notesConsumed = len;
                 }
 
                 if (generatedPattern.length > 0) {
@@ -440,16 +451,10 @@ export const generateBeatmap = (
             if (numericDiff >= 18 && onset.energy > 0.95) simNotes = 3;
         }
         
-        // Determine overlap behavior for CATCH notes
-        // If we are generating a Catch, we allow overlap.
-        // But here we are determining SIMULTANEOUS notes.
-        // We handle catch generation separately below.
-        
         if (activeHolds.length > 0 && features.catch) {
-             // Allow at least 1 extra note if holding, specifically for Catch
              simNotes = Math.max(simNotes, 1);
         } else {
-             // Standard hold restriction
+             // Reduce max polyphony if many holds are active
              simNotes = Math.min(simNotes, config.maxPolyphony - activeHolds.length);
         }
         
@@ -457,18 +462,15 @@ export const generateBeatmap = (
         if (playStyle === 'THUMB' && numericDiff < 18) simNotes = Math.min(simNotes, 2);
 
         // --- Decide Note Type before Physics ---
-        // We need to know if we are trying to generate a Catch note to allow overlap in physics
         let isCatchGeneration = false;
         
-        // Simple heuristic: If we have active holds, and catch is enabled, high chance this beat is a catch
-        // especially if it's a high energy hit or specific flow
         if (features.catch && activeHolds.length > 0) {
             if (Math.random() < 0.5) isCatchGeneration = true;
         }
 
         // Generate Single/Chord via Physics
-        // Pass 'isCatchGeneration' as 'allowOverlap' to physics engine
-        const lanes = physics.getBestLanes(simNotes, onset.time, config.allowedCost, currentSection.style as any, isCatchGeneration);
+        // Pass style and flow to physics for smarter random/jump handling
+        const lanes = physics.getBestLanes(simNotes, onset.time, config.allowedCost, style, desc.flow, isCatchGeneration);
 
         let nextNoteTime = 9999;
         if (noteIndex + 1 < onsets.length) nextNoteTime = onsets[noteIndex+1].time;
@@ -482,22 +484,29 @@ export const generateBeatmap = (
             // Check if this lane is currently holding
             const isLaneHolding = activeHolds.some(h => h.lane === lane);
 
-            // --- Hold Logic ---
-            // Only generate hold if no other hold active (simple logic) or if high level
-            // AND the lane is not already holding (overlap hold-on-hold is bad)
-            if (features.holds && lanes.length === 1 && activeHolds.length === 0 && !isLaneHolding) {
+            // --- HOLD LOGIC REFACTOR ---
+            // Removed global 'activeHolds.length === 0' constraint.
+            // Removed 'lanes.length === 1' constraint.
+            if (features.holds && !isLaneHolding) {
                 const maxDur = nextNoteTime - onset.time - 0.1;
                 
-                if (maxDur > beatDur * 0.5) {
-                    let holdChance = 0.15; 
+                // Allow holds even for chords, but maybe limit density
+                // If there are already 2+ holds active, reduce chance unless high diff
+                const tooManyHolds = activeHolds.length >= 2 && numericDiff < 15;
+
+                if (maxDur > beatDur * 0.5 && !tooManyHolds) {
+                    let holdChance = 0.2; // Base chance increased
                     
-                    if (currentSection.style === 'hold') holdChance += 0.5;
-                    if (currentSection.style === 'simple') holdChance += 0.2;
-                    if (desc.focus === 'vocal' || desc.focus === 'melody') holdChance += 0.25;
+                    // Strongly respect AI 'hold' style
+                    if (style === 'hold') holdChance += 0.8; 
+                    if (style === 'simple') holdChance += 0.2;
+                    if (desc.focus === 'vocal' || desc.focus === 'melody') holdChance += 0.3;
                     if (numericDiff < 8) holdChance += 0.1; 
 
                     if (Math.random() < holdChance) {
-                        duration = Math.min(maxDur, beatDur * 2.0); 
+                        // Hold duration: randomly between min and max, biased towards beat intervals
+                        const targetDur = Math.min(maxDur, beatDur * 4.0); // Cap at 4 beats
+                        duration = targetDur;
                     }
                 }
             }
@@ -506,7 +515,6 @@ export const generateBeatmap = (
             if (features.catch && duration === 0) {
                 let catchChance = 0.05; 
                 
-                // If this lane is holding, force catch if we decided to generate on it
                 if (isLaneHolding) {
                     catchChance = 1.0; 
                 } else if (activeHolds.length > 0) {
@@ -515,7 +523,7 @@ export const generateBeatmap = (
 
                 if (desc.flow === 'slide') catchChance = 0.9;
                 if (isCatchChain) catchChance += 0.6;
-                if (desc.flow === 'circular' && currentSection.style === 'stream') catchChance += 0.3;
+                if (desc.flow === 'circular' && style === 'stream') catchChance += 0.3;
                 if (onset.energy > 0.8 && desc.focus === 'bass') catchChance += 0.2; 
 
                 if (desc.flow === 'linear' || desc.flow === 'zigzag') catchChance = 0; 
@@ -548,7 +556,7 @@ const createNote = (time: number, lane: number, duration: number, type: NoteType
     isHolding: false,
     type
 });
-
+// ... calculateDifficultyRating remains unchanged ...
 export const calculateDifficultyRating = (notes: Note[], duration: number): number => {
     if (notes.length === 0 || duration === 0) return 0;
     const sortedNotes = [...notes].sort((a, b) => a.time - b.time);

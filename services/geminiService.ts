@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { SongStructure, AITheme, DEFAULT_THEME } from "../types";
+import { SongStructure } from "../types";
 
 const getEffectiveKey = (userKey?: string) => {
   if (userKey && userKey.trim().length > 0) {
@@ -9,28 +9,7 @@ const getEffectiveKey = (userKey?: string) => {
   return process.env.API_KEY || '';
 };
 
-interface AIAnalysisResult {
-    bpm?: number;
-    sections?: any[];
-    theme?: {
-        primaryColor: string;
-        secondaryColor: string;
-        catchColor?: string;
-        perfectColor: string;
-        goodColor: string;
-        mood: string;
-    };
-    metadata?: {
-        identifiedTitle?: string;
-        identifiedArtist?: string;
-        identifiedAlbum?: string;
-    }
-}
-
 export interface GenerationOptions {
-    structure: boolean;
-    theme: boolean;
-    metadata: boolean;
     difficultyLevel?: number; // 1-20
     stylePreference?: string; // 'Balanced' | 'Stream' | 'Tech' | 'Flow'
     modelOverride?: string; // Allow forcing a model (e.g. Pro)
@@ -54,14 +33,13 @@ const generateWithRetry = async (
             });
             
             if (response.text) {
-                // Validate JSON parsing
                 const data = JSON.parse(response.text);
                 return data; 
             } else {
                 throw new Error("Empty response text");
             }
         } catch (e: any) {
-            console.warn(`Gemini Attempt ${i+1} failed:`, e);
+            console.warn(`Gemini Structure Attempt ${i+1} failed:`, e);
             lastError = e;
             if (i < maxRetries - 1) await sleep(1500 * (i + 1)); // Backoff
         }
@@ -70,36 +48,30 @@ const generateWithRetry = async (
 };
 
 /**
- * AI 决策层：分析歌曲结构 + 视觉主题 + 元数据识别
+ * AI 决策层：仅分析歌曲结构 (Structure)
+ * Metadata, BPM, Theme now handled in Phase 1.
  */
 export const analyzeStructureWithGemini = async (
-  filename: string, 
   audioBase64: string, 
   mimeType: string,
   userApiKey?: string,
-  options: GenerationOptions = { structure: true, theme: true, metadata: true }
-): Promise<{ structure: SongStructure, theme: AITheme, metadata?: { title?: string, artist?: string, album?: string } }> => {
+  options: GenerationOptions = {}
+): Promise<{ sections: SongStructure['sections'] }> => {
   
   const apiKey = getEffectiveKey(userApiKey);
 
-  const defaultStructure: SongStructure = {
-      bpm: 120,
-      sections: [{ 
-          startTime: 0, 
-          endTime: 600, 
-          type: 'verse', 
-          intensity: 0.8, 
-          style: 'stream',
-          descriptors: { flow: 'linear', hand_bias: 'balanced', focus: 'melody' }
-      }]
-  };
+  const defaultSections: SongStructure['sections'] = [{ 
+      startTime: 0, 
+      endTime: 600, 
+      type: 'verse', 
+      intensity: 0.8, 
+      style: 'stream',
+      descriptors: { flow: 'linear', hand_bias: 'balanced', focus: 'melody' }
+  }];
   
-  let finalTheme = { ...DEFAULT_THEME };
-  const finalMetadata = { title: undefined as string | undefined, artist: undefined as string | undefined, album: undefined as string | undefined };
-
-  if ((!options.structure && !options.theme && !options.metadata) || !apiKey) {
-    if (!apiKey) console.warn("No API Key provided, using DSP fallback.");
-    return { structure: defaultStructure, theme: finalTheme, metadata: finalMetadata };
+  if (!apiKey) {
+    console.warn("No API Key provided, using DSP fallback.");
+    return { sections: defaultSections };
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -116,120 +88,65 @@ export const analyzeStructureWithGemini = async (
     - Style Preference: ${style}.
     
     CRITICAL INSTRUCTION FOR PATTERN SELECTION:
-    1. **Low Difficulty (1-7)**:
-       - When you hear pitch scaling (stairs) or continuous flows, use **'slide'**.
-       - 'slide' triggers Catch/Slider notes, which are fun and easy.
-       - AVOID 'linear' (streams) at low difficulty.
+    1. **SUSTAINED SOUNDS = HOLDS**:
+       - If you hear long vocals, synth pads, or held strings, you **MUST** set 'style' to **'hold'**.
+       - Do not use 'stream' for slow, sustained sections.
        
-    2. **High Difficulty (12-20)**:
-       - When you hear pitch scaling or fast rhythms, use **'linear'**.
-       - 'linear' triggers dense Note Streams (Stairs), requiring high stamina.
-       - Use 'slide' ONLY for very specific synthesizer wubs or glissandos.
-    
-    3. **Mid Difficulty (8-11)**:
-       - Mix 'linear' and 'slide' based on the instrument. 
-       - Vocals -> 'slide'. Drums -> 'linear'/'zigzag'.
+    2. **UNIQUE MELODIES = RANDOM/JUMP**:
+       - For distinct, non-repetitive melodies (solos, complex riffs), use 'style': **'jump'** and 'flow': **'random'**.
+       - This tells the engine to create chaotic, high-contrast patterns.
+       
+    3. **FAST RHYTHMS = STREAM**:
+       - Only use 'stream'/'linear' for actual high-speed drum rolls or arpeggios.
     `;
 
-    let taskInstruction = "";
-    const properties: any = {};
-    const requiredProps: string[] = [];
-
-    // --- Task 1: Structure (If requested) ---
-    if (options.structure) {
-        taskInstruction += `
-        Task 1: Structure & Choreography
-        - Identify accurate BPM.
+    let taskInstruction = `
+        Task: Structure & Choreography
         - **Micro-Segmentation**: 
-          - The music changes frequently. Do NOT create sections longer than 8-10 seconds unless the song is monotonous.
-          - Detect changes in: Drum Pattern (Kick/Snare), Instrument Density, Vocal Flow.
-          - Create a new section immediately when the texture changes.
+          - Analyze the audio texture changes (Kick/Snare/Vocal flow).
+          - Break song into sections (approx 4-16 bars).
         
         - Define "Motion Descriptors" for each section:
-          - style: 'stream' (continuous), 'jump' (spiky), 'hold' (long notes), 'simple' (breaks).
+          - style: 
+             - 'hold': **MANDATORY** for long notes/vocals.
+             - 'jump': For expressive, bouncy, or random melodies.
+             - 'stream': For continuous 1/4 or 1/8 beat flows.
+             - 'simple': For quiet parts.
           - descriptors.flow: 
              - 'slide': Smooth visual movement (Low Diff = Catch Stairs; High Diff = Tech Sliders).
-             - 'linear': Directional streams (Low Diff = Avoid; High Diff = Stamina Stairs).
-             - 'circular': Rolling patterns.
-             - 'zigzag': Sharp, angular jumps.
-             - 'random': Chaotic/High Energy.
-          - descriptors.focus: 
-             - 'drum': Lock onto Kick/Snare.
-             - 'melody': Follow lead synth/guitar.
-             - 'vocal': Follow voice.
-             - 'bass': Follow bassline.
-          - descriptors.special_pattern: 
-             - 'burst': Extremely fast 1/4 or 1/8 bursts (Drum fills).
-             - 'fill': Syncopated rhythm pattern.
-             - 'none': Standard.
-          - intensity: 0.0 (Silence) to 1.0 (Peak Climax).
-        `;
+             - 'linear': Directional streams (Stairs).
+             - 'random': **Chaotic** placement for unique melodies.
+             - 'zigzag', 'circular'.
+          - descriptors.focus: 'drum', 'melody', 'vocal', 'bass'.
+          - descriptors.special_pattern: 'burst', 'fill', 'none'.
+          - intensity: 0.0 (Silence) to 1.0 (Peak).
+    `;
         
-        properties.bpm = { type: Type.NUMBER };
-        properties.sections = {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-                startTime: { type: Type.NUMBER },
-                endTime: { type: Type.NUMBER },
-                type: { type: Type.STRING },
-                intensity: { type: Type.NUMBER },
-                style: { type: Type.STRING, enum: ['stream', 'jump', 'hold', 'simple'] },
-                descriptors: {
-                    type: Type.OBJECT,
-                    properties: {
-                        flow: { type: Type.STRING, enum: ['linear', 'zigzag', 'circular', 'random', 'slide'] },
-                        hand_bias: { type: Type.STRING, enum: ['alternating', 'left_heavy', 'right_heavy', 'balanced'] },
-                        focus: { type: Type.STRING, enum: ['vocal', 'drum', 'melody', 'bass'] },
-                        special_pattern: { type: Type.STRING, enum: ['burst', 'fill', 'none'] }
-                    },
-                    required: ['flow', 'hand_bias', 'focus']
-                }
-            },
-            required: ['startTime', 'endTime', 'type', 'intensity', 'style', 'descriptors']
-          }
-        };
-        requiredProps.push("bpm", "sections");
-    }
-    
-    // --- Task 2: Theme (If requested) ---
-    if (options.theme) {
-        taskInstruction += `
-        Task 2: Visual Theme
-        - Select colors that match the song's emotion (e.g., Red/Black for Aggressive, Pink/Cyan for Pop, Blue/Purple for Electronic).
-        `;
-        properties.theme = {
-            type: Type.OBJECT,
-            properties: {
-                primaryColor: { type: Type.STRING },
-                secondaryColor: { type: Type.STRING },
-                catchColor: { type: Type.STRING },
-                perfectColor: { type: Type.STRING },
-                goodColor: { type: Type.STRING },
-                mood: { type: Type.STRING }
-            },
-            required: ['primaryColor', 'secondaryColor', 'catchColor', 'perfectColor', 'goodColor', 'mood']
-        };
-        requiredProps.push("theme");
-    }
-
-    // --- Task 3: Metadata (If requested) ---
-    if (options.metadata) {
-        taskInstruction += `
-        Task 3: Metadata
-        - Filename: "${filename}"
-        - Use 'googleSearch' to find official Title/Artist.
-        `;
-        properties.metadata = {
-            type: Type.OBJECT,
-            properties: {
-                identifiedTitle: { type: Type.STRING },
-                identifiedArtist: { type: Type.STRING },
-                identifiedAlbum: { type: Type.STRING }
+    const properties: any = {};
+    properties.sections = {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+            startTime: { type: Type.NUMBER },
+            endTime: { type: Type.NUMBER },
+            type: { type: Type.STRING },
+            intensity: { type: Type.NUMBER },
+            style: { type: Type.STRING, enum: ['stream', 'jump', 'hold', 'simple'] },
+            descriptors: {
+                type: Type.OBJECT,
+                properties: {
+                    flow: { type: Type.STRING, enum: ['linear', 'zigzag', 'circular', 'random', 'slide'] },
+                    hand_bias: { type: Type.STRING, enum: ['alternating', 'left_heavy', 'right_heavy', 'balanced'] },
+                    focus: { type: Type.STRING, enum: ['vocal', 'drum', 'melody', 'bass'] },
+                    special_pattern: { type: Type.STRING, enum: ['burst', 'fill', 'none'] }
+                },
+                required: ['flow', 'hand_bias', 'focus']
             }
-        };
-    }
+        },
+        required: ['startTime', 'endTime', 'type', 'intensity', 'style', 'descriptors']
+      }
+    };
 
     taskInstruction += `\nReturn strictly JSON.`;
 
@@ -241,12 +158,11 @@ export const analyzeStructureWithGemini = async (
             ]
         },
         config: {
-            tools: options.metadata ? [{ googleSearch: {} }] : [],
             responseMimeType: "application/json",
             responseSchema: {
                 type: Type.OBJECT,
                 properties: properties,
-                required: requiredProps.length > 0 ? requiredProps : undefined
+                required: ['sections']
             }
         }
     };
@@ -254,33 +170,15 @@ export const analyzeStructureWithGemini = async (
     try {
         const data = await generateWithRetry(ai, modelName, promptPayload, 3);
         
-        let structureResult = defaultStructure;
-        if (options.structure && data.bpm && data.sections) {
-            const normalizedSections = data.sections.map((s: any) => ({
+        let sectionsResult = defaultSections;
+        if (data.sections) {
+            sectionsResult = data.sections.map((s: any) => ({
                 ...s,
                 descriptors: s.descriptors || { flow: 'random', hand_bias: 'balanced', focus: 'melody' }
             }));
-            structureResult = { bpm: data.bpm, sections: normalizedSections };
         }
         
-        if (options.theme && data.theme) {
-            finalTheme = {
-                primaryColor: data.theme.primaryColor,
-                secondaryColor: data.theme.secondaryColor,
-                catchColor: data.theme.catchColor || DEFAULT_THEME.catchColor,
-                perfectColor: data.theme.perfectColor || data.theme.primaryColor,
-                goodColor: data.theme.goodColor || '#ffffff',
-                moodDescription: data.theme.mood
-            };
-        }
-
-        if (options.metadata && data.metadata) {
-            finalMetadata.title = data.metadata.identifiedTitle;
-            finalMetadata.artist = data.metadata.identifiedArtist;
-            finalMetadata.album = data.metadata.identifiedAlbum;
-        }
-
-        return { structure: structureResult, theme: finalTheme, metadata: finalMetadata };
+        return { sections: sectionsResult };
 
     } catch (e: any) {
         throw new Error("AI_RETRY_EXHAUSTED");
@@ -288,12 +186,12 @@ export const analyzeStructureWithGemini = async (
 
   } catch (error: any) {
     console.error("Gemini Analysis Failed:", error);
-    if (error.message === "AI_RETRY_EXHAUSTED") throw error; // Re-throw specific error
+    if (error.message === "AI_RETRY_EXHAUSTED") throw error;
     throw error;
   }
 };
 
-// ... generatePatternWithGemini ...
+// ... generatePatternWithGemini remains unchanged ...
 export const generatePatternWithGemini = async (
     prompt: string,
     params: {

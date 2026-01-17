@@ -157,13 +157,66 @@ export const computeOnsets = (
     return onsets;
 };
 
+/**
+ * 3. 估算 BPM (Simple Interval Histogram)
+ * 基于 Onsets 计算最可能的 BPM
+ */
+export const estimateBPM = (onsets: Onset[]): number => {
+    if (onsets.length < 10) return 120;
+
+    const intervals: number[] = [];
+    // Only verify adjacent or near-adjacent onsets to find beat interval
+    for (let i = 0; i < onsets.length - 1; i++) {
+        for (let j = i + 1; j < Math.min(i + 5, onsets.length); j++) {
+            const delta = onsets[j].time - onsets[i].time;
+            if (delta > 0.2 && delta < 1.0) { // 60-300 BPM range roughly
+                intervals.push(delta);
+            }
+        }
+    }
+
+    if (intervals.length === 0) return 120;
+
+    // Bucket intervals (precision 10ms)
+    const buckets: Record<number, number> = {};
+    intervals.forEach(val => {
+        const bucket = Math.round(val * 100) / 100; // 0.01s precision
+        buckets[bucket] = (buckets[bucket] || 0) + 1;
+    });
+
+    let bestInterval = 0.5;
+    let maxCount = 0;
+
+    Object.entries(buckets).forEach(([intervalStr, count]) => {
+        const interval = parseFloat(intervalStr);
+        // Weight by nearby buckets to smooth
+        let weightedCount = count;
+        if (buckets[interval - 0.01]) weightedCount += buckets[interval - 0.01] * 0.5;
+        if (buckets[interval + 0.01]) weightedCount += buckets[interval + 0.01] * 0.5;
+        
+        if (weightedCount > maxCount) {
+            maxCount = weightedCount;
+            bestInterval = interval;
+        }
+    });
+
+    let estimatedBPM = 60 / bestInterval;
+
+    // Clamp to reasonable range (80 - 180 is typical safe zone)
+    while (estimatedBPM < 80) estimatedBPM *= 2;
+    while (estimatedBPM > 190) estimatedBPM /= 2;
+
+    return Math.round(estimatedBPM);
+};
+
 // Legacy Wrapper for backward compatibility if needed (Purely Main Thread)
 export const analyzeAudioDSP = async (
   arrayBuffer: ArrayBuffer, 
   audioContext: AudioContext
-): Promise<{ buffer: AudioBuffer; onsets: Onset[]; duration: number }> => {
+): Promise<{ buffer: AudioBuffer; onsets: Onset[]; duration: number; estimatedBPM: number }> => {
   const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
   const { lowData, fullData } = await preprocessAudioData(audioBuffer);
   const onsets = computeOnsets(lowData, fullData, audioBuffer.sampleRate);
-  return { buffer: audioBuffer, onsets, duration: audioBuffer.duration };
+  const estimatedBPM = estimateBPM(onsets);
+  return { buffer: audioBuffer, onsets, duration: audioBuffer.duration, estimatedBPM };
 };
