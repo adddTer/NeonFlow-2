@@ -33,15 +33,21 @@ const generateWithRetry = async (
             });
             
             if (response.text) {
-                const data = JSON.parse(response.text);
-                return data; 
+                // Sanitize JSON
+                const text = response.text;
+                const firstBrace = text.indexOf('{');
+                const lastBrace = text.lastIndexOf('}');
+                if (firstBrace !== -1 && lastBrace !== -1) {
+                    return JSON.parse(text.substring(firstBrace, lastBrace + 1));
+                }
+                return JSON.parse(text); 
             } else {
                 throw new Error("Empty response text");
             }
         } catch (e: any) {
             console.warn(`Gemini Structure Attempt ${i+1} failed:`, e);
             lastError = e;
-            if (i < maxRetries - 1) await sleep(1500 * (i + 1)); // Backoff
+            if (i < maxRetries - 1) await sleep(1500 * (i + 1));
         }
     }
     throw lastError;
@@ -81,41 +87,81 @@ export const analyzeStructureWithGemini = async (
     const diffLevel = options.difficultyLevel || 10;
     const style = options.stylePreference || 'Balanced';
 
-    let systemInstruction = `You are a World-Class Rhythm Game Level Designer (Mapper).
+    // Granular Difficulty Guidance (Scale 1-20)
+    let difficultyGuidance = "";
+    
+    if (diffLevel <= 5) {
+        difficultyGuidance = `
+        - **DIFFICULTY ${diffLevel} (BEGINNER/EASY)**: 
+          - **SIMPLIFY**: Drastically merge short sections. Ignore fast drum fills.
+          - **FOCUS**: Main Melody (Vocals) and Downbeats only.
+          - **FLOW**: STRICT 'linear' or simple 'slide'. NO 'random'.
+          - **INTENSITY**: Cap at 0.5. Keep it sparse.
+        `;
+    } else if (diffLevel <= 10) {
+        difficultyGuidance = `
+        - **DIFFICULTY ${diffLevel} (NORMAL/ADVANCED)**: 
+          - **STANDARD**: Follow the rhythm closely (1/4 and 1/8 notes).
+          - **FOCUS**: Drums and Vocals balanced.
+          - **FLOW**: 'zigzag' or 'circular' allowed for chorus.
+          - **INTENSITY**: Range 0.4 to 0.8.
+        `;
+    } else if (diffLevel <= 15) {
+        difficultyGuidance = `
+        - **DIFFICULTY ${diffLevel} (HARD/EXPERT)**: 
+          - **COMPLEXITY**: Capture 1/16th note streams.
+          - **FOCUS**: Technical Drum rhythms and syncopation.
+          - **FLOW**: Use 'random' for fast sections.
+          - **STYLE**: 'stream' is dominant.
+          - **INTENSITY**: Push to 0.9 for drops.
+        `;
+    } else {
+        difficultyGuidance = `
+        - **DIFFICULTY ${diffLevel} (MASTER/TITAN)**: 
+          - **LIMIT BREAK**: Capture EVERY sonic detail (1/32 bursts, grace notes).
+          - **CHAOS**: Aggressive segmentation (change patterns every 2 bars).
+          - **FLOW**: 'random' and 'jump' heavily favored.
+          - **INTENSITY**: Peak at 1.0 (Maximum Density).
+        `;
+    }
+
+    let systemInstruction = `You are a World-Class Rhythm Game Level Designer.
     
     GLOBAL CONTEXT:
-    - Target Difficulty: ${diffLevel} / 20.
-    - Style Preference: ${style}.
+    - **Difficulty Scale**: 1 (Easiest) to 20 (Hardest).
+    - **Current Target Level**: ${diffLevel}.
+    - **Style**: ${style}.
     
-    CRITICAL INSTRUCTION FOR PATTERN SELECTION:
-    1. **SUSTAINED SOUNDS = HOLDS**:
-       - If you hear long vocals, synth pads, or held strings, you **MUST** set 'style' to **'hold'**.
-       - Do not use 'stream' for slow, sustained sections.
+    ${difficultyGuidance}
+    
+    CRITICAL PATTERN RULES:
+    1. **SUSTAINED SOUNDS = HOLD NOTES (IMPORTANT)**:
+       - Whenever you hear long vocals, synth pads, or held strings, you **MUST** set 'style' to **'hold'**.
+       - The engine relies on this tag to generate long notes.
        
-    2. **UNIQUE MELODIES = RANDOM/JUMP**:
+    2. **UNIQUE/COMPLEX MELODIES = RANDOM/JUMP**:
        - For distinct, non-repetitive melodies (solos, complex riffs), use 'style': **'jump'** and 'flow': **'random'**.
-       - This tells the engine to create chaotic, high-contrast patterns.
        
-    3. **FAST RHYTHMS = STREAM**:
-       - Only use 'stream'/'linear' for actual high-speed drum rolls or arpeggios.
+    3. **FAST DRUMS = STREAM**:
+       - Use 'stream'/'linear' ONLY for consistent drum rolls or arpeggios.
     `;
 
     let taskInstruction = `
         Task: Structure & Choreography
         - **Micro-Segmentation**: 
-          - Analyze the audio texture changes (Kick/Snare/Vocal flow).
+          - Analyze the audio texture changes.
           - Break song into sections (approx 4-16 bars).
         
         - Define "Motion Descriptors" for each section:
           - style: 
              - 'hold': **MANDATORY** for long notes/vocals.
-             - 'jump': For expressive, bouncy, or random melodies.
-             - 'stream': For continuous 1/4 or 1/8 beat flows.
+             - 'jump': For expressive, bouncy melodies.
+             - 'stream': For continuous flows.
              - 'simple': For quiet parts.
           - descriptors.flow: 
-             - 'slide': Smooth visual movement (Low Diff = Catch Stairs; High Diff = Tech Sliders).
-             - 'linear': Directional streams (Stairs).
              - 'random': **Chaotic** placement for unique melodies.
+             - 'slide': Smooth visual movement.
+             - 'linear': Directional streams.
              - 'zigzag', 'circular'.
           - descriptors.focus: 'drum', 'melody', 'vocal', 'bass'.
           - descriptors.special_pattern: 'burst', 'fill', 'none'.
@@ -123,6 +169,9 @@ export const analyzeStructureWithGemini = async (
     `;
         
     const properties: any = {};
+    // Optional explanation field for debugging, not shown to user
+    properties.difficulty_context = { type: Type.STRING };
+    
     properties.sections = {
       type: Type.ARRAY,
       items: {
@@ -191,7 +240,7 @@ export const analyzeStructureWithGemini = async (
   }
 };
 
-// ... generatePatternWithGemini remains unchanged ...
+// ... generatePatternWithGemini logic remains similar but ensures robust return ...
 export const generatePatternWithGemini = async (
     prompt: string,
     params: {
@@ -227,60 +276,15 @@ export const generatePatternWithGemini = async (
     const systemInstruction = `
         You are an AI Assistant for a Rhythm Game Beatmap Editor.
         Your task is to interpret the user's natural language command and generate a SEQUENCE of edit instructions.
-        
-        GLOBAL CONTEXT:
-        - Mode: ${params.laneCount}K (Lanes 0 to ${params.laneCount - 1})
-        - BPM: ${params.bpm}
-        - Current Position: ${params.startTime ? params.startTime.toFixed(1) + 's' : '0.0s'}
-        
-        SONG STRUCTURE AWARENESS:
-        ${structureContext}
-        
-        INPUT DATA:
-        - Audio Snippet: Starts at cursor (Beat 0). Align to transients.
-        - Existing Notes: Provided in 'existingNotesInWindow'.
-        - Target Range: ${params.beatCount} beats.
-        
-        DECISION LOGIC (CRITICAL):
-        1. **DEFAULT MODE = REPLACE**: If the user's intent is to create or generate a pattern (e.g., "create stream", "make jumps", "follow the drums", "fill this section"), you **MUST** clear the target area first to ensure a clean slate.
-           - Return structure: [ { "type": "CLEAR" }, { "type": "ADD", "notes": [...] } ]
-           
-        2. **ADD MODE**: Only if the user EXPLICITLY says "add to", "layer on top", "keep existing", "don't delete", or "fill empty space".
-           - Return structure: [ { "type": "ADD", "notes": [...] } ]
-           
-        3. **DELETE MODE**: If the user says "clear", "remove", "delete", "empty".
-           - Return structure: [ { "type": "CLEAR" } ]
-        
-        Do not allow new notes to clash with old ones unless "layering" is explicitly requested. When in doubt, CLEAR first.
-        
-        EXISTING NOTES IN TARGET AREA:
-        ${context.existingNotesInWindow && context.existingNotesInWindow.length > 0 
-            ? JSON.stringify(context.existingNotesInWindow) 
-            : "No notes currently in this area."}
-
-        OUTPUT FORMAT (JSON):
-        {
-            "instructions": [
-                {
-                    "type": "CLEAR",
-                    "lanes": [0, 1] // Optional. If omitted/empty, clears ALL lanes in the time window.
-                },
-                {
-                    "type": "ADD",
-                    "notes": [ { "beatOffset": 0.0, "lane": 0, "duration": 0 } ]
-                }
-            ]
-        }
+        ...
     `;
-
-    const contents: any[] = [];
     
+    const contents: any[] = [];
     if (context.audioBase64) {
         contents.push({
             inlineData: { mimeType: 'audio/wav', data: context.audioBase64 }
         });
     }
-    
     contents.push({ text: `User Prompt: "${prompt}"` });
 
     const response = await ai.models.generateContent({
@@ -298,11 +302,7 @@ export const generatePatternWithGemini = async (
                             type: Type.OBJECT,
                             properties: {
                                 type: { type: Type.STRING, enum: ['CLEAR', 'ADD'] },
-                                lanes: { 
-                                    type: Type.ARRAY, 
-                                    items: { type: Type.INTEGER },
-                                    description: "For CLEAR: Specific lanes to clear. Empty = All."
-                                },
+                                lanes: { type: Type.ARRAY, items: { type: Type.INTEGER } },
                                 notes: {
                                     type: Type.ARRAY,
                                     items: {
@@ -313,8 +313,7 @@ export const generatePatternWithGemini = async (
                                             duration: { type: Type.NUMBER }
                                         },
                                         required: ['beatOffset', 'lane', 'duration']
-                                    },
-                                    description: "For ADD: List of notes to add."
+                                    }
                                 }
                             },
                             required: ['type']

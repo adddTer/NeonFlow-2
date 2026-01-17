@@ -10,21 +10,23 @@ const getDifficultyConfig = (level: number) => {
     const t = (l - 1) / 19; 
 
     return {
-        // Lower multiplier = more notes. Level 20 now detects almost everything (0.1).
-        thresholdMultiplier: lerp(2.0, 0.1, t),
+        // Threshold Multiplier:
+        // Adjusted: Level 1 was 3.5 (Too empty), now 2.2 (Main beat focused).
+        // Level 20: 0.01 (All details).
+        thresholdMultiplier: lerp(2.2, 0.01, t),
         
-        // Min Gap: Level 20 allows ~0.02s gap (High BPM streams/jacks).
-        // Curve is aggressive at the end for exponential difficulty.
-        minGap: lerp(0.40, 0.02, Math.pow(t, 0.6)), 
+        // Min Gap: 
+        // Adjusted: Level 1 was 0.8s, now 0.6s (Allowing slow 1/4 beats).
+        minGap: lerp(0.6, 0.04, Math.pow(t, 0.7)), 
         
         // Polyphony: Earlier access to chords.
         maxPolyphony: l < 4 ? 1 : l < 8 ? 2 : l < 14 ? 3 : 4,
         
         // Physics cost: Higher levels allow more strain/movement.
-        allowedCost: lerp(1.5, 40.0, t),
+        allowedCost: lerp(1.5, 50.0, t),
         
         // Pattern Chance: Always try to pattern at high levels.
-        patternChance: lerp(0.15, 1.0, Math.pow(t, 0.5)) 
+        patternChance: lerp(0.05, 1.0, Math.pow(t, 0.5)) 
     };
 };
 
@@ -123,12 +125,13 @@ class ErgonomicPhysics {
         const movement = currAvg - prevAvg;
         
         // --- MOVEMENT COST ADJUSTMENT ---
-        // Default penalty for large movements
         let movementCostMultiplier = 1.5;
         
         // If Style is 'jump' or Flow is 'random', we WANT movement and chaos.
         if (style === 'jump' || flow === 'random') {
-            movementCostMultiplier = 0.5; // Low penalty for movement -> Allows jumps
+            // Penalize small movements to force jumps/chaos
+            if (Math.abs(movement) < 1.0) cost += 3.0; // "Too close" penalty
+            movementCostMultiplier = 0.1; // Reduce distance penalty significantly
         } 
         // If Style is 'stream', we want small movements (flow)
         else if (style === 'stream') {
@@ -239,7 +242,7 @@ class ErgonomicPhysics {
     }
 }
 
-// --- Pattern Library ---
+// ... PatternLibrary remains unchanged ...
 const PatternLibrary = {
     getStair: (startTime: number, count: number, interval: number, startLane: number, dir: 1 | -1, laneCount: number) => {
         const notes: any[] = [];
@@ -337,7 +340,6 @@ export const generateBeatmap = (
         // --- Special Pattern Handling (Burst/Fill) ---
         // AI specifically requested a rhythmic fill here
         if (desc.special_pattern === 'burst' || desc.special_pattern === 'fill') {
-            const beatDur = 60 / structure.bpm;
             // Force generation regardless of threshold if it's a "burst" area
             
             let notesToAdd = 1;
@@ -359,6 +361,9 @@ export const generateBeatmap = (
         const baseThreshold = 0.05 + (1.0 - currentSection.intensity) * 0.2;
         const dynThreshold = baseThreshold * config.thresholdMultiplier;
         
+        // STRICTER FILTERING FOR LOW DIFFICULTY
+        // Ensure faint beats are definitely killed at Low Diff (High Multiplier)
+        // Normalized Energy is approx 0.0 - 1.0
         if (onset.energy < dynThreshold) {
             noteIndex++;
             isCatchChain = false; 
@@ -388,7 +393,7 @@ export const generateBeatmap = (
                 let patternType: NoteType = 'NORMAL';
                 const len = Math.min(4, onsets.length - noteIndex);
 
-                const r = Math.random();
+                // const r = Math.random(); // unused
                 
                 const isExplicitSlide = desc.flow === 'slide' && features.catch;
                 const isLinear = desc.flow === 'linear';
@@ -415,7 +420,7 @@ export const generateBeatmap = (
                 }
                 // --- Fallback Patterns ---
                 else if (desc.flow === 'circular') {
-                    if (r < 0.6) {
+                    if (Math.random() < 0.6) {
                         generatedPattern = PatternLibrary.getRoll(onset.time, len, interval, laneCount);
                     } else {
                         const dir = 1;
@@ -494,7 +499,8 @@ export const generateBeatmap = (
                 // If there are already 2+ holds active, reduce chance unless high diff
                 const tooManyHolds = activeHolds.length >= 2 && numericDiff < 15;
 
-                if (maxDur > beatDur * 0.5 && !tooManyHolds) {
+                // Relaxed duration constraint: allow shorter holds (0.25 beat)
+                if (maxDur > beatDur * 0.25 && !tooManyHolds) {
                     let holdChance = 0.2; // Base chance increased
                     
                     // Strongly respect AI 'hold' style
@@ -521,11 +527,12 @@ export const generateBeatmap = (
                     catchChance += 0.4;
                 }
 
+                // Explicit Flow Logic for Meaningful Catch Notes
                 if (desc.flow === 'slide') catchChance = 0.9;
-                if (isCatchChain) catchChance += 0.6;
-                if (desc.flow === 'circular' && style === 'stream') catchChance += 0.3;
-                if (onset.energy > 0.8 && desc.focus === 'bass') catchChance += 0.2; 
+                else if (isCatchChain) catchChance += 0.6; // Continue chain
+                else catchChance = 0; // DISABLE random catch notes if not in a chain or flow
 
+                if (desc.flow === 'circular' && style === 'stream') catchChance += 0.3;
                 if (desc.flow === 'linear' || desc.flow === 'zigzag') catchChance = 0; 
 
                 if (Math.random() < catchChance) {

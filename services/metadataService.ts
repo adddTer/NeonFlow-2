@@ -35,19 +35,31 @@ const generateWithRetry = async (
             });
             
             if (response.text) {
-                // Sanitize: Remove markdown code blocks if present
-                let jsonStr = response.text.trim();
-                if (jsonStr.startsWith('```')) {
-                    jsonStr = jsonStr.replace(/^```(json)?\n?/, '').replace(/\n?```$/, '');
+                // Robust JSON Parsing: Find first '{' and last '}'
+                const text = response.text;
+                const firstBrace = text.indexOf('{');
+                const lastBrace = text.lastIndexOf('}');
+                
+                if (firstBrace !== -1 && lastBrace !== -1) {
+                    const jsonStr = text.substring(firstBrace, lastBrace + 1);
+                    try {
+                        const data = JSON.parse(jsonStr);
+                        return data; 
+                    } catch (parseError) {
+                        console.warn("JSON Parse Error:", parseError);
+                    }
                 }
                 
-                try {
-                    const data = JSON.parse(jsonStr);
-                    return data;
-                } catch (parseError) {
-                    console.warn("JSON Parse Error on sanitized text:", jsonStr);
-                    throw parseError;
+                // Fallback: try cleaning code blocks
+                let cleanStr = text.trim();
+                if (cleanStr.startsWith('```')) {
+                    cleanStr = cleanStr.replace(/^```(json)?\n?/, '').replace(/\n?```$/, '');
+                    try {
+                        return JSON.parse(cleanStr);
+                    } catch(e) {}
                 }
+                
+                throw new Error("Failed to parse JSON response");
             } else {
                 throw new Error("Empty response text");
             }
@@ -84,50 +96,43 @@ export const analyzeMetadataWithGemini = async (
   const modelName = 'gemini-3-flash-preview'; 
 
   const systemInstruction = `
-    You are an Expert Music Metadata Archivist and Visual Designer.
-    Your task is to identify the Song Metadata (Title, Artist, BPM) and design a Visual Theme based on the audio and filename.
-    
-    You MUST use 'googleSearch' to verify the song details.
+    You are an Expert Music Metadata Archivist.
+    Your task is to identify the official Song Metadata (Title, Artist, BPM) using 'googleSearch'.
 
-    ### 1. TITLE & ARTIST RULES (STRICT):
-    - **Remove Artist from Title**: If the filename is "Artist - Title", return Title only in the title field.
-    - **Language Priority (CRITICAL)**: 
-      - **Priority Order**: [Chinese] > [Japanese/Korean] > [English] > [Other].
-      - **ALWAYS PRESERVE/FIND THE NATIVE TITLE**. 
-      - **Logic**:
-        1. If the filename ALREADY contains Chinese/Japanese, **YOU MUST PUT IT FIRST**.
-        2. If the filename is English ONLY (e.g. "Polumnia Omnia") but the artist is Asian (e.g. "HOYO-MiX"), you **MUST** search for the original Chinese/Japanese title (e.g. "啁晰流变之砂").
-        3. **English** (or other official aliases) follows after a space.
-      - **Separator**: Use a single space. No brackets around the alias.
-      - **Format**: \`[Primary Language Title] [Secondary Language Title]\`
-      
-      **Examples:**
-      - File: "HOYO-MiX - 戏剧性反讽 A Dramatic Irony" -> Title: "戏剧性反讽 A Dramatic Irony" (Preserve Order)
-      - File: "HOYO-MiX - Polumnia Omnia" -> Search -> Title: "啁晰流变之砂 Polumnia Omnia" (Find Chinese)
-      - File: "Genshin Impact - Lie of the Beholder" -> Title: "瞳孔里的伪象 Lie of the Beholder" (Find Chinese)
-      - Incorrect: "A Dramatic Irony" (Missing Native)
-      - Incorrect: "A Dramatic Irony 戏剧性反讽" (Wrong Order)
-      
-    - **Preserve Stylistic Prefixes**: Do NOT remove intentional style markers like "NAME ==".
-      - Example: "HOYO-MiX - NAME == 隐德来希 NAME == Entelechy" -> Title: "NAME == 隐德来希 NAME == Entelechy".
+    === 1. TITLE FORMATTING (THE GOLDEN RULE) ===
     
-    ### 2. BPM (Beats Per Minute):
-    - Use 'googleSearch' to find the official BPM.
-    - Programmatic Estimate Provided: ${hintBPM}. 
-    - If Google Search finds a definitive BPM, use that. If not, use the estimate or refine it based on audio context.
+    **MANDATORY**: If a song has an official title in **BOTH** Native Language (Chinese/Japanese/Korean) **AND** English, you **MUST** return both.
     
-    ### 3. VISUAL THEME (NO DARK COLORS):
-    - Determine 'primaryColor' and 'secondaryColor' based on the song's cover art or mood.
-    - **CONSTRAINT**: The game background is dark/black. 
-    - **FORBIDDEN**: Do NOT use dark gray, black, or very dark colors (e.g. #333333, #1a1a1a, #222222) for primary/secondary.
-    - **REQUIRED**: Use BRIGHT, SATURATED, or NEON colors (e.g. #00f3ff, #ff00ff, #f9f871, #00ffaa) that pop against black.
+    **FORMAT**: "NativeTitle EnglishTitle" (Separated by ONE SPACE).
+    
+    **[KEY EXAMPLE]**
+    Context: User uploads "HOYO-MiX - 故事与甜饼 Stories and Sweets.mp3" or searches for this song.
+    
+    ❌ WRONG: "Stories and Sweets"            (Reason: Missing Native)
+    ❌ WRONG: "故事与甜饼"                    (Reason: Missing English)
+    ❌ WRONG: "故事与甜饼 (Stories and Sweets)" (Reason: Do NOT use brackets)
+    ❌ WRONG: "Stories and Sweets 故事与甜饼"    (Reason: Native must be first)
+    
+    ✅ CORRECT: "故事与甜饼 Stories and Sweets"
+
+    **NO AUTO-TRANSLATION**: Only include English if it is part of the OFFICIAL release title (on Spotify/Apple Music). If no official English title exists, return ONLY Native.
+
+    === 2. CLEANING ===
+    - Remove junk: (Official), [MV], (Cover), (Lyrics), (HQ).
+    - Remove featuring artists from title.
+
+    === 3. ARTIST ===
+    - Use the standard international name (e.g. "HOYO-MiX", "YOASOBI").
+
+    === 4. VISUAL THEME ===
+    - NO dark colors (gray, black). Use saturated NEON colors.
   `;
 
   const promptPayload = {
       contents: {
           parts: [
               { inlineData: { mimeType: mimeType, data: audioBase64 } },
-              { text: `Filename: "${filename}". DSP Estimated BPM: ${hintBPM}. Identify Metadata, BPM and Theme.` }
+              { text: `Filename: "${filename}". DSP Estimated BPM: ${hintBPM}. Identify Metadata.` }
           ]
       },
       config: {
@@ -161,8 +166,13 @@ export const analyzeMetadataWithGemini = async (
   try {
       const data = await generateWithRetry(ai, modelName, promptPayload, 3);
       
+      // Post-processing to enforce space rule in case AI hallucinates brackets despite prompt
+      let cleanTitle = data.identifiedTitle || fallbackResult.title;
+      // Regex: Remove brackets and ensure single spaces
+      cleanTitle = cleanTitle.replace(/[\[\(\{]/g, ' ').replace(/[\]\)\}]/g, '').replace(/\s+/g, ' ').trim();
+
       return {
-          title: data.identifiedTitle || fallbackResult.title,
+          title: cleanTitle,
           artist: data.identifiedArtist || fallbackResult.artist,
           album: data.identifiedAlbum,
           bpm: data.officialBpm || hintBPM,
