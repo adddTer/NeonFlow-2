@@ -108,7 +108,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ songs, onClose }) =>
                                 <Trophy className="w-32 h-32 text-white" />
                             </div>
                             <div className="relative z-10">
-                                <div className="text-xs font-bold text-gray-400 uppercase tracking-[0.2em] mb-2">Potential Rating</div>
+                                <div className="text-xs font-bold text-gray-400 uppercase tracking-[0.2em] mb-2">潜力值 (Potential)</div>
                                 <div className="text-6xl md:text-7xl font-black text-white tracking-tighter drop-shadow-lg flex items-baseline gap-2">
                                     {stats.rating.toFixed(2)}
                                     <span className="text-lg text-gray-500 font-bold">PT</span>
@@ -191,11 +191,11 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ songs, onClose }) =>
                     {/* Additional Stats */}
                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                          <div className="bg-white/5 p-4 rounded-xl border border-white/5">
-                             <div className="text-[10px] text-gray-500 uppercase font-bold">Full Combos</div>
+                             <div className="text-[10px] text-gray-500 uppercase font-bold">全连 (Full Combo)</div>
                              <div className="text-2xl font-black text-neon-yellow">{stats.fullCombos}</div>
                          </div>
                          <div className="bg-white/5 p-4 rounded-xl border border-white/5">
-                             <div className="text-[10px] text-gray-500 uppercase font-bold">Clear Rate</div>
+                             <div className="text-[10px] text-gray-500 uppercase font-bold">通关率 (Clear Rate)</div>
                              <div className="text-2xl font-black text-white">{stats.totalPlayCount > 0 ? ((stats.clearedSongs / stats.totalSongs) * 100).toFixed(0) : 0}%</div>
                          </div>
                      </div>

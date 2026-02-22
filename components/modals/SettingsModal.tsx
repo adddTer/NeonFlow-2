@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Settings, X, Keyboard, Volume2, Gauge, Bug, Check, Loader2, AlertTriangle, Key, Monitor, Gamepad2, MousePointer2, RefreshCw } from 'lucide-react';
+import { Settings, X, Keyboard, Volume2, Gauge, Bug, Check, Loader2, AlertTriangle, Key, Monitor, Gamepad2, MousePointer2, RefreshCw, Eye } from 'lucide-react';
 import { KeyConfig } from '../../types';
 
 interface SettingsModalProps {
@@ -21,7 +21,9 @@ interface SettingsModalProps {
     rebindingKey: { mode: 4 | 6; index: number } | null;
     setRebindingKey: (k: { mode: 4 | 6; index: number } | null) => void;
     hasEnvKey: boolean;
-    onRestartTutorial?: () => void; // New Prop
+    onRestartTutorial?: () => void;
+    showKeys: boolean;
+    setShowKeys: (b: boolean) => void;
 }
 
 type SettingsTab = 'GAMEPLAY' | 'CONTROLS' | 'SYSTEM';
@@ -34,10 +36,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     apiKeyStatus, customApiKey, setCustomApiKey,
     handleSaveSettings, validationError,
     rebindingKey, setRebindingKey, hasEnvKey,
-    onRestartTutorial
+    onRestartTutorial,
+    showKeys, setShowKeys
 }) => {
     
     const [activeTab, setActiveTab] = useState<SettingsTab>('GAMEPLAY');
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
 
     const TabButton = ({ id, icon: Icon, label }: { id: SettingsTab, icon: any, label: string }) => (
         <button 
@@ -125,8 +129,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                             />
                                          </div>
                                          <div className="flex justify-between text-[10px] text-gray-500 font-bold tracking-widest font-mono">
-                                             <span>1.0 (SLOW)</span>
-                                             <span>10.0 (FAST)</span>
+                                             <span>1.0 (慢)</span>
+                                             <span>10.0 (快)</span>
                                          </div>
                                      </div>
 
@@ -151,6 +155,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                              </button>
                                          </div>
                                      </div>
+
+                                     {/* Show Keys Toggle (Desktop Only) */}
+                                     {!isMobile && (
+                                         <div className="bg-white/5 border border-white/5 rounded-2xl p-6 flex items-center justify-between transition-all hover:bg-white/[0.07]">
+                                             <div className="flex items-center gap-3">
+                                                 <div className="p-2 bg-white/10 rounded-lg text-white"><Eye className="w-5 h-5" /></div>
+                                                 <div>
+                                                     <div className="font-bold text-white">显示按键</div>
+                                                     <div className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Show Key Labels</div>
+                                                 </div>
+                                             </div>
+                                             <label className="relative inline-flex items-center cursor-pointer">
+                                                 <input type="checkbox" checked={showKeys} onChange={(e) => setShowKeys(e.target.checked)} className="sr-only peer" />
+                                                 <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-neon-blue"></div>
+                                             </label>
+                                         </div>
+                                     )}
                                  </div>
                              )}
 
@@ -163,13 +184,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                      <div className="bg-white/5 border border-white/5 rounded-2xl p-6">
                                          <div className="flex items-center gap-2 mb-4">
                                              <div className="w-1.5 h-6 bg-neon-blue rounded-full"></div>
-                                             <span className="text-sm font-black text-white uppercase tracking-wider">4 Key Mode</span>
+                                             <span className="text-sm font-black text-white uppercase tracking-wider">4键模式 (4 Key)</span>
                                          </div>
                                          <div className="grid grid-cols-4 gap-3 md:gap-4">
                                              {keyConfig.k4.map((k, i) => (
                                                  <KeyButton 
                                                     key={i} 
-                                                    label={`LANE ${i+1}`} 
+                                                    label={`轨道 ${i+1}`} 
                                                     value={k} 
                                                     onClick={() => setRebindingKey({mode: 4, index: i})} 
                                                     color="text-neon-blue"
@@ -183,13 +204,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                      <div className="bg-white/5 border border-white/5 rounded-2xl p-6">
                                          <div className="flex items-center gap-2 mb-4">
                                              <div className="w-1.5 h-6 bg-neon-purple rounded-full"></div>
-                                             <span className="text-sm font-black text-white uppercase tracking-wider">6 Key Mode</span>
+                                             <span className="text-sm font-black text-white uppercase tracking-wider">6键模式 (6 Key)</span>
                                          </div>
                                          <div className="grid grid-cols-6 gap-2 md:gap-3">
                                              {keyConfig.k6.map((k, i) => (
                                                  <KeyButton 
                                                     key={i} 
-                                                    label={`L${i+1}`} 
+                                                    label={`轨道 ${i+1}`} 
                                                     value={k} 
                                                     onClick={() => setRebindingKey({mode: 6, index: i})} 
                                                     color="text-neon-purple"
@@ -211,10 +232,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                           <div className="flex items-center justify-between mb-2">
                                               <div className="font-bold text-white flex items-center gap-2">
                                                   <div className={`w-2 h-2 rounded-full ${apiKeyStatus === 'valid' ? 'bg-green-500 shadow-[0_0_8px_#22c55e]' : apiKeyStatus === 'checking' ? 'bg-yellow-500 animate-pulse' : 'bg-red-500'}`}></div>
-                                                  Gemini AI Service
+                                                  Gemini AI 服务
                                               </div>
                                               <div className={`text-xs font-bold uppercase px-2 py-1 rounded bg-black/20 ${apiKeyStatus === 'valid' ? 'text-green-400' : apiKeyStatus === 'invalid' ? 'text-red-400' : 'text-gray-400'}`}>
-                                                  {apiKeyStatus === 'valid' ? 'ONLINE' : apiKeyStatus === 'checking' ? 'CHECKING...' : apiKeyStatus === 'invalid' ? 'ERROR' : 'OFFLINE'}
+                                                  {apiKeyStatus === 'valid' ? '在线' : apiKeyStatus === 'checking' ? '检查中...' : apiKeyStatus === 'invalid' ? '错误' : '离线'}
                                               </div>
                                           </div>
                                           <p className="text-xs text-gray-500 leading-relaxed pl-4 border-l-2 border-white/5">
@@ -223,7 +244,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                      </div>
 
                                      <div className="bg-white/5 border border-white/5 rounded-2xl p-6">
-                                         <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">API Configuration</label>
+                                         <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">API 配置</label>
                                          <div className="relative group">
                                              <input 
                                                  type="password" 

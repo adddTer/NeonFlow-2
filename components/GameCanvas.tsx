@@ -1,5 +1,5 @@
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { Note, ScoreState, GameStatus, AITheme, LaneCount, NoteLane, SongStructure, GameModifier } from '../types';
 import { useSoundSystem } from '../hooks/useSoundSystem';
 import { Particle, GhostNote, HitEffect, ObjectPool, GhostNoteObj } from './game/Visuals';
@@ -18,7 +18,8 @@ interface GameCanvasProps {
   hideNotes?: boolean; 
   isPaused?: boolean; 
   onScoreUpdate: (score: ScoreState) => void;
-  onGameEnd: (finalScore: ScoreState) => void; 
+  onGameEnd: (finalScore: ScoreState) => void;
+  showKeys?: boolean;
 }
 
 const BASE_TARGET_WIDTH = 100; 
@@ -45,9 +46,20 @@ const hexToRgb = (hex: string) => {
     } : { r: 0, g: 0, b: 0 };
 };
 
+// Helper: Ensure color visibility (contrast against dark background)
+const ensureContrast = (hex: string, fallback: string): string => {
+    if (!hex) return fallback;
+    const rgb = hexToRgb(hex);
+    // Calculate luminance (Perceived brightness)
+    const luma = 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b;
+    // Threshold: if darker than ~30% gray, swap to fallback
+    if (luma < 80) return fallback;
+    return hex;
+};
+
 const GameCanvas: React.FC<GameCanvasProps> = ({ 
   status, audioBuffer, notes, structure, theme, audioOffset, scrollSpeed,
-  keyBindings, modifiers, hideNotes, onScoreUpdate, onGameEnd 
+  keyBindings, modifiers, hideNotes, onScoreUpdate, onGameEnd, showKeys
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -107,6 +119,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
   const { playHitSound } = useSoundSystem();
 
+  // Memoize safe theme to prevent flickering colors
+  const safeTheme = useMemo(() => ({
+      ...theme,
+      primaryColor: ensureContrast(theme.primaryColor, '#00f3ff'),
+      secondaryColor: ensureContrast(theme.secondaryColor, '#bd00ff')
+  }), [theme]);
+
   useEffect(() => {
       if (modifiers.includes(GameModifier.DoubleTime)) playbackRateRef.current = 1.5;
       else if (modifiers.includes(GameModifier.HalfTime)) playbackRateRef.current = 0.75;
@@ -133,11 +152,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
   const processHit = (lane: number) => {
     if (!audioContextRef.current) return;
+    // Prevent manual input interference in Auto mode
+    if (isAutoRef.current) return;
+
     const gameTime = getCurrentGameTime();
     const windowGood = BASE_HIT_WINDOW_GOOD * hitWindowMultiplierRef.current;
 
     // Prioritize clicking non-Catch notes first (heads of normal/holds)
-    // Catch notes are handled in gameLoop for "hold-to-collect", but explicit tapping also works here.
     const hitNote = notesRef.current.find(n => 
       !n.hit && !n.missed && n.lane === lane && n.type === 'NORMAL' && 
       Math.abs(gameTime - n.time) < windowGood
@@ -187,6 +208,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   };
 
   const processRelease = (lane: number) => {
+      // Prevent manual input interference in Auto mode (stops accidental hold breaks)
+      if (isAutoRef.current) return;
+
       // Find note that is currently being held in this lane
       const holdingNote = notesRef.current.find(n => n.lane === lane && n.isHolding);
       
@@ -201,8 +225,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
               // Released too early -> MISS / Break Combo
               holdingNote.isHolding = false;
               holdingNote.visible = false; // Stop drawing
-              // We don't mark 'missed' flag to avoid double counting if loop catches it, 
-              // but we do apply penalty immediately.
               
               scoreRef.current.combo = 0;
               scoreRef.current.miss++;
@@ -305,6 +327,21 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
       ctx.fillRect(startX - 1, 0, 1, height);
       ctx.fillRect(startX + count * laneW, 0, 1, height);
+
+      // Draw Key Labels if enabled and NOT mobile
+      if (showKeys && !isMobileRef.current && labelsRef.current.length > 0) {
+          const hitLineY = height * 0.80; // Standard desktop hit line
+          ctx.font = 'bold 24px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = 'rgba(255,255,255,0.4)';
+          
+          for (let i = 0; i < count; i++) {
+              const x = startX + i * laneW + laneW / 2;
+              const y = hitLineY + 60; // Below the hit line
+              ctx.fillText(labelsRef.current[i], x, y);
+          }
+      }
   };
 
   const playMusic = (offset: number = 0) => {
@@ -381,7 +418,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       const { height } = sizeRef.current;
       const laneX = (startXRef.current + lane * laneWidthRef.current + laneWidthRef.current / 2);
       const hitY = height * (isMobileRef.current ? 0.85 : 0.80);
-      const hitColor = isPerfect ? theme.perfectColor : theme.goodColor;
+      const hitColor = isPerfect ? safeTheme.perfectColor : safeTheme.goodColor;
       
       const pCount = isMobileRef.current ? (isPerfect ? 10 : 6) : (isPerfect ? 20 : 12);
       for (let i = 0; i < pCount; i++) {
@@ -408,8 +445,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0); 
       ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(p, p, boxW, boxH);
-      ctx.strokeStyle = theme.primaryColor; ctx.lineWidth = 1; ctx.strokeRect(p, p, boxW, boxH);
-      ctx.font = 'bold 11px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = theme.primaryColor;
+      ctx.strokeStyle = safeTheme.primaryColor; ctx.lineWidth = 1; ctx.strokeRect(p, p, boxW, boxH);
+      ctx.font = 'bold 11px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = safeTheme.primaryColor;
       ctx.fillText(`FPS: ${fpsRef.current}`, p + 10, p + 10);
       ctx.fillText(`Frame Time: ${frameTime.toFixed(2)}ms`, p + 10, p + 25);
       ctx.fillStyle = '#fff';
@@ -484,7 +521,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
     ctx.globalAlpha = 0.08;
     const baseAmbient = ctx.createRadialGradient(width/2, height/2, width*0.1, width/2, height/2, width*0.8);
-    baseAmbient.addColorStop(0, theme.secondaryColor); baseAmbient.addColorStop(1, 'transparent');
+    baseAmbient.addColorStop(0, safeTheme.secondaryColor); baseAmbient.addColorStop(1, 'transparent');
     ctx.fillStyle = baseAmbient; ctx.fillRect(0, 0, width, height);
     ctx.globalAlpha = 1.0;
     
@@ -495,8 +532,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     
     if (finalOpacity > 0.01) {
         ctx.globalAlpha = finalOpacity;
-        const priRgb = hexToRgb(theme.primaryColor);
-        const secRgb = hexToRgb(theme.secondaryColor);
+        const priRgb = hexToRgb(safeTheme.primaryColor);
+        const secRgb = hexToRgb(safeTheme.secondaryColor);
         const mix = Math.min(1, Math.max(0, visualIntensity - 0.2) * 1.2);
         const r = Math.round(secRgb.r + (priRgb.r - secRgb.r) * mix);
         const g = Math.round(secRgb.g + (priRgb.g - secRgb.g) * mix);
@@ -512,9 +549,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     else layoutDirtyRef.current = true;
 
     const hitBarAlpha = 0.4 + beatPulse * 0.3;
-    ctx.fillStyle = `${theme.primaryColor}${Math.floor(hitBarAlpha * 255).toString(16).padStart(2,'0')}`;
+    ctx.fillStyle = `${safeTheme.primaryColor}${Math.floor(hitBarAlpha * 255).toString(16).padStart(2,'0')}`;
     ctx.fillRect(startX, hitLineY - 1, count * laneW, 2);
-    ctx.fillStyle = `${theme.primaryColor}22`;
+    ctx.fillStyle = `${safeTheme.primaryColor}22`;
     ctx.fillRect(startX, hitLineY - 3, count * laneW, 6);
 
     for (let i = 0; i < count; i++) {
@@ -527,14 +564,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         if (laneHitStateRef.current[i] > 0) {
             const alpha = laneHitStateRef.current[i];
             const grad = ctx.createLinearGradient(x, hitLineY, x, hitLineY - 300); 
-            grad.addColorStop(0, `${theme.primaryColor}${Math.floor(alpha * 100).toString(16).padStart(2,'0')}`);
+            grad.addColorStop(0, `${safeTheme.primaryColor}${Math.floor(alpha * 100).toString(16).padStart(2,'0')}`);
             grad.addColorStop(1, 'rgba(0,0,0,0)');
             ctx.fillStyle = grad;
             ctx.fillRect(x, hitLineY - 300, laneW, 300);
             if (!isFrozen) laneHitStateRef.current[i] = Math.max(0, alpha - 0.1);
         }
         if (keyStateRef.current[i] || (isAutoRef.current && laneHitStateRef.current[i] > 0.5)) {
-            ctx.fillStyle = `${theme.primaryColor}22`; 
+            ctx.fillStyle = `${safeTheme.primaryColor}22`; 
             ctx.fillRect(x, hitLineY - 150, laneW, 150);
         }
     }
@@ -567,9 +604,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             drawHeight = Math.max(0, (note.time + note.duration - gameTime) * speed); 
         }
         const tailW = noteW * 0.8; const tailX = noteX + (noteW - tailW) / 2;
-        ctx.fillStyle = note.missed ? '#44444444' : `${theme.secondaryColor}44`;
+        ctx.fillStyle = note.missed ? '#44444444' : `${safeTheme.secondaryColor}44`;
         ctx.fillRect(tailX, drawHeadY - drawHeight, tailW, drawHeight);
-        ctx.fillStyle = note.missed ? '#444' : theme.secondaryColor;
+        ctx.fillStyle = note.missed ? '#444' : safeTheme.secondaryColor;
         ctx.fillRect(tailX, drawHeadY - drawHeight - 2, tailW, 4); 
     });
 
@@ -589,6 +626,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             const totalNotes = notesRef.current.length || 1;
             const scorePerPerfect = ((MAX_SCORE * ACC_WEIGHT) / totalNotes) * 1.0 + ((MAX_SCORE * COMBO_WEIGHT) / totalNotes);
             scoreRef.current.score = Math.min(MAX_SCORE, scoreRef.current.score + scorePerPerfect);
+
+            // Record a perfect 0ms offset hit for histogram consistency
+            scoreRef.current.hitHistory.push(0);
 
             triggerHitVisuals(note.lane, 'PERFECT');
             onScoreUpdate({...scoreRef.current});
@@ -633,7 +673,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                     // Holding Effect
                     if (Math.random() > 0.6) {
                         const p = particlePoolRef.current.get();
-                        p.reset((startX + note.lane * laneW + laneW / 2), hitLineY, theme.secondaryColor);
+                        p.reset((startX + note.lane * laneW + laneW / 2), hitLineY, safeTheme.secondaryColor);
                         particlesRef.current.push(p);
                     }
                     
@@ -664,10 +704,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         let opacity = 1.0;
         if (isHiddenRef.current && !note.missed && !note.isHolding) opacity = Math.max(0, Math.min(1, (hitLineY - headY - 100) / 300));
 
-        let noteColor = theme.primaryColor; 
+        let noteColor = safeTheme.primaryColor; 
         if (note.missed) noteColor = '#444444';
-        else if (note.type === 'CATCH') noteColor = theme.catchColor || '#f9f871';
-        else if (note.duration > 0) noteColor = theme.secondaryColor;
+        else if (note.type === 'CATCH') noteColor = safeTheme.catchColor || '#f9f871';
+        else if (note.duration > 0) noteColor = safeTheme.secondaryColor;
 
         ctx.globalAlpha = note.missed ? 0.4 : opacity;
 
@@ -703,7 +743,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     for (let i = activeGhosts.length - 1; i >= 0; i--) {
         const g = activeGhosts[i];
         const y = hitLineY - (g.timeDiff * speed);
-        ctx.globalAlpha = g.life * 0.4; ctx.fillStyle = theme.secondaryColor;
+        ctx.globalAlpha = g.life * 0.4; ctx.fillStyle = safeTheme.secondaryColor;
         ctx.fillRect(startX + g.lane * laneW + 4, y - 6, laneW - 8, 12);
         ctx.globalAlpha = 1.0; 
         
@@ -748,7 +788,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
     const progress = Math.min(1, Math.max(0, gameTime) / (audioBuffer?.duration || 1));
     ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.fillRect(0, 0, width, 4);
-    ctx.fillStyle = theme.primaryColor; ctx.fillRect(0, 0, width * progress, 4);
+    ctx.fillStyle = safeTheme.primaryColor; ctx.fillRect(0, 0, width * progress, 4);
 
     drawSystemStats(ctx, width, height, performance.now());
 
@@ -757,7 +797,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.save();
         const yPos = height * (width > height ? 0.2 : 0.3);
         ctx.translate(width / 2, yPos); ctx.scale(comboScaleRef.current, comboScaleRef.current);
-        const fontSize = isMobileRef.current ? 48 : 80;
+        const fontSize = isMobileRef.current ? 32 : 80; // Reduced for mobile
         ctx.font = `italic 900 ${fontSize}px sans-serif`; ctx.textAlign = 'center';
         ctx.fillStyle = '#ffffff';
         ctx.fillText(scoreRef.current.combo.toString(), 0, 0);

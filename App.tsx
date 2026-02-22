@@ -60,7 +60,7 @@ function App() {
   const { 
     scrollSpeed, setScrollSpeed, keyConfig, setKeyConfig, audioOffset, setAudioOffset,
     isDebugMode, toggleDebugMode, customApiKey, setCustomApiKey, apiKeyStatus, 
-    validationError, handleSaveSettings, hasEnvKey
+    validationError, handleSaveSettings, hasEnvKey, showKeys, setShowKeys
   } = useAppSettings();
 
   const {
@@ -365,25 +365,62 @@ function App() {
   };
 
   const MODS_LIST = [
-      { id: GameModifier.DoubleTime, label: 'DT', name: 'Double Time', icon: <FastForward className="w-5 h-5"/>, color: 'text-red-400', desc: '1.5倍速 (无分数加成)' },
-      { id: GameModifier.HalfTime, label: 'HT', name: 'Half Time', icon: <Rewind className="w-5 h-5"/>, color: 'text-blue-400', desc: '0.75倍速' },
-      { id: GameModifier.HardRock, label: 'HR', name: 'Hard Rock', icon: <Crosshair className="w-5 h-5"/>, color: 'text-orange-400', desc: '严苛判定' },
-      { id: GameModifier.SuddenDeath, label: 'SD', name: 'Sudden Death', icon: <Skull className="w-5 h-5"/>, color: 'text-gray-400', desc: '失误即死' },
-      { id: GameModifier.Hidden, label: 'HD', name: 'Hidden', icon: <EyeOff className="w-5 h-5"/>, color: 'text-purple-400', desc: '隐形音符' },
-      { id: GameModifier.Flashlight, label: 'FL', name: 'Flashlight', icon: <Flashlight className="w-5 h-5"/>, color: 'text-yellow-400', desc: '受限视野' },
-      { id: GameModifier.Auto, label: 'Auto', name: 'Auto Play', icon: <Bot className="w-5 h-5"/>, color: 'text-green-400', desc: '自动演示' },
+      { id: GameModifier.DoubleTime, label: 'DT', name: '双倍速', icon: <FastForward className="w-5 h-5"/>, color: 'text-red-400', desc: '1.5倍速 (无分数加成)' },
+      { id: GameModifier.HalfTime, label: 'HT', name: '半速', icon: <Rewind className="w-5 h-5"/>, color: 'text-blue-400', desc: '0.75倍速' },
+      { id: GameModifier.HardRock, label: 'HR', name: '极限判定', icon: <Crosshair className="w-5 h-5"/>, color: 'text-orange-400', desc: '严苛判定区间' },
+      { id: GameModifier.SuddenDeath, label: 'SD', name: '骤死模式', icon: <Skull className="w-5 h-5"/>, color: 'text-gray-400', desc: '失误即失败' },
+      { id: GameModifier.Hidden, label: 'HD', name: '隐形', icon: <EyeOff className="w-5 h-5"/>, color: 'text-purple-400', desc: '音符提前消失' },
+      { id: GameModifier.Flashlight, label: 'FL', name: '手电筒', icon: <Flashlight className="w-5 h-5"/>, color: 'text-yellow-400', desc: '视野受限' },
+      { id: GameModifier.Auto, label: 'Auto', name: '自动演示', icon: <Bot className="w-5 h-5"/>, color: 'text-green-400', desc: 'AI 自动游玩' },
   ];
 
   if (isDebugMode) {
       MODS_LIST.push(
-          { id: GameModifier.Performance, label: 'PF', name: 'Perf Stats', icon: <Activity className="w-5 h-5"/>, color: 'text-cyan-400', desc: '显示系统性能监视' },
-          { id: GameModifier.KeepScore, label: 'SV', name: 'Force Save', icon: <Save className="w-5 h-5"/>, color: 'text-pink-400', desc: '强制保存成绩' }
+          { id: GameModifier.Performance, label: 'PF', name: '性能监视', icon: <Activity className="w-5 h-5"/>, color: 'text-cyan-400', desc: '显示 FPS/延迟' },
+          { id: GameModifier.KeepScore, label: 'SV', name: '强制保存', icon: <Save className="w-5 h-5"/>, color: 'text-pink-400', desc: '开启 Mod 仍保存成绩' }
       );
   }
 
   return (
-    <div className="h-[100dvh] w-full flex flex-col transition-colors duration-1000 font-sans text-white select-none relative overflow-hidden" style={{ background: (status === GameStatus.Library || status === GameStatus.Details) ? '#030304' : `radial-gradient(circle at center, ${theme.secondaryColor}22 0%, #030304 100%)` }}>
+    <div className="h-[100dvh] w-full flex flex-col transition-colors duration-1000 font-sans text-white select-none relative overflow-hidden bg-[#030304]">
       
+      {/* Mobile Scaling Injection */}
+      <style>{`
+        @media (max-width: 768px) {
+          html {
+            font-size: 13px; /* Scale down UI on mobile */
+          }
+        }
+        
+        /* Global Animations */
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
+        @keyframes grid-move {
+            0% { transform: translateY(0); }
+            100% { transform: translateY(40px); }
+        }
+      `}</style>
+
+      {/* --- Dynamic Global Background --- */}
+      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+          {/* 1. Deep Space Gradient */}
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#1a1b2e] via-[#050505] to-black opacity-80"></div>
+          
+          {/* 2. Moving Grid (Perspective) */}
+          <div className="absolute inset-0 perspective-[1000px] opacity-20">
+              <div className="absolute inset-[-100%] w-[300%] h-[300%] bg-[linear-gradient(to_right,#444_1px,transparent_1px),linear-gradient(to_bottom,#444_1px,transparent_1px)] bg-[size:40px_40px] animate-[grid-move_2s_linear_infinite] [transform:rotateX(60deg)_translateZ(-200px)] origin-top"></div>
+          </div>
+
+          {/* 3. Floating Particles */}
+          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-neon-blue/10 rounded-full blur-[100px] animate-pulse"></div>
+          <div className="absolute bottom-1/4 right-1/4 w-64 h-64 bg-neon-purple/10 rounded-full blur-[80px] animate-pulse" style={{ animationDelay: '2s' }}></div>
+          
+          {/* 4. Noise Overlay */}
+          <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10 mix-blend-overlay"></div>
+      </div>
+
       {/* Modals & Overlays */}
       {showOnboarding && <OnboardingOverlay onComplete={completeOnboarding} />}
       {showCalibration && <AudioCalibration initialOffset={audioOffset} onClose={(newOffset) => { setAudioOffset(newOffset); localStorage.setItem('neonflow_audio_offset', String(newOffset)); setShowCalibration(false); setShowSettings(true); }} />}
@@ -405,7 +442,7 @@ function App() {
             isDebugMode={isDebugMode} skipAI={skipAI} setSkipAI={setSkipAI}
             aiOptions={aiOptions} setAiOptions={setAiOptions}
             errorState={errorState} resetError={resetError}
-            useProModel={useProModel} setUseProModel={setUseProModel} // FIX: Pass down props
+            useProModel={useProModel} setUseProModel={setUseProModel}
         />
       )}
       
@@ -419,7 +456,8 @@ function App() {
             apiKeyStatus={apiKeyStatus} customApiKey={customApiKey} setCustomApiKey={setCustomApiKey}
             handleSaveSettings={() => handleSaveSettings(() => setShowSettings(false))} validationError={validationError}
             rebindingKey={rebindingKey} setRebindingKey={setRebindingKey} hasEnvKey={hasEnvKey}
-            onRestartTutorial={restartTutorial} 
+            onRestartTutorial={restartTutorial}
+            showKeys={showKeys} setShowKeys={setShowKeys}
         />
       )}
 
@@ -435,8 +473,7 @@ function App() {
         onTitleClick={handleTitleClick}
       />
 
-      <main className="flex-1 relative flex flex-col items-center justify-center overflow-hidden w-full">
-        {/* ... (Rest of the JSX remains mostly unchanged, just rendering screens based on status) ... */}
+      <main className="flex-1 relative flex flex-col items-center justify-center overflow-hidden w-full z-10">
         {status === GameStatus.Library && (
             <LibraryScreen 
                 songs={librarySongs} isLoading={isLibraryLoading} hasApiKey={apiKeyStatus === 'valid' || isDebugMode}
@@ -645,7 +682,8 @@ function App() {
                     modifiers={Array.from(activeModifiers)}
                     isPaused={status === GameStatus.Paused} 
                     onScoreUpdate={setScore} 
-                    onGameEnd={handleGameEnd} 
+                    onGameEnd={handleGameEnd}
+                    showKeys={showKeys}
                  />
             </div>
         )}
