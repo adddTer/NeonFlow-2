@@ -126,7 +126,7 @@ export const OnboardingOverlay: React.FC<OnboardingOverlayProps> = ({ onComplete
     const STEPS = [
         {
             title: "欢迎来到 NeonFlow 2",
-            desc: "您的下一代 AI 节奏游戏引擎。将任何音频文件转化为可游玩的动态谱面。",
+            desc: "基于音频分析生成的节奏游戏引擎。将任何音频文件转化为可游玩的动态谱面。",
             visual: <WelcomeVisual />,
             bg: "from-blue-900/40 to-purple-900/40"
         },
@@ -137,14 +137,14 @@ export const OnboardingOverlay: React.FC<OnboardingOverlayProps> = ({ onComplete
             bg: "from-blue-900/40 to-transparent"
         },
         {
-            title: "AI 智能生成",
-            desc: "集成 Gemini 3 Flash 模型，精准分析歌曲结构、BPM 与情感色彩，一键生成谱面。",
+            title: "DSP 算法生成",
+            desc: "集成高精度信号处理引擎，精准分析歌曲结构、BPM 与动态能量，一键生成谱面。",
             visual: <AiVisual />,
-            bg: "from-purple-900/40 to-transparent"
+            bg: "from-blue-900/40 to-transparent"
         },
         {
-            title: "配置 API Key",
-            desc: "为了获得 AI 分析能力，请在设置中配置您的 Google API Key。支持本地与环境变量配置。",
+            title: "高性能架构",
+            desc: "完全运行在浏览器中的客户端解析，通过 Web Worker 分流音频特征提取，告别卡顿。",
             visual: <ApiKeyVisual />,
             bg: "from-gray-800/40 to-transparent"
         },

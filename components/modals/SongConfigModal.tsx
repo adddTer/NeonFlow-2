@@ -184,9 +184,9 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                                  <BrainCircuit className={`w-6 h-6 ${mode === 'AUTO' ? 'text-neon-blue' : 'text-gray-500'}`} />
                                  {mode === 'AUTO' && <div className="w-2 h-2 bg-neon-blue rounded-full shadow-[0_0_10px_#00f3ff]"></div>}
                              </div>
-                             <div className={`font-black text-lg ${mode === 'AUTO' ? 'text-white' : 'text-gray-400'}`}>AI 智能生成</div>
+                             <div className={`font-black text-lg ${mode === 'AUTO' ? 'text-white' : 'text-gray-400'}`}>算法生成</div>
                              <div className="text-xs text-gray-500 mt-1 leading-relaxed">
-                                 Gemini 分析音乐情感与结构，生成完整的谱面。
+                                 通过 DSP 数据驱动自动分析生成谱面。
                              </div>
                          </button>
 
@@ -303,38 +303,7 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                                      </div>
                                  </div>
 
-                                 {/* Pro Model Toggle */}
-                                 {setUseProModel && (
-                                     <div className="space-y-2 mt-2">
-                                         <button 
-                                             onClick={() => setUseProModel(!useProModel)}
-                                             className={`w-full p-4 rounded-xl border transition-all flex items-center justify-between group ${useProModel ? 'bg-neon-purple/10 border-neon-purple/50' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
-                                         >
-                                             <div className="flex items-center gap-3">
-                                                 <div className={`p-2 rounded-lg ${useProModel ? 'bg-neon-purple text-white' : 'bg-white/10 text-gray-400'}`}>
-                                                     <Zap className="w-5 h-5 fill-current" />
-                                                 </div>
-                                                 <div className="text-left">
-                                                     <div className={`text-sm font-bold ${useProModel ? 'text-white' : 'text-gray-400'}`}>Gemini 3 Pro 分析</div>
-                                                     <div className="text-[10px] text-gray-500">用于第二阶段结构分析 (更精准/更耗时)</div>
-                                                 </div>
-                                             </div>
-                                             <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${useProModel ? 'border-neon-purple bg-neon-purple text-white' : 'border-gray-600'}`}>
-                                                 {useProModel && <Check className="w-4 h-4" />}
-                                             </div>
-                                         </button>
-                                     </div>
-                                 )}
 
-                                 {/* Debug / Skip AI */}
-                                 {isDebugMode && (
-                                     <div className={`p-4 rounded-xl border transition-colors cursor-pointer mt-4 ${skipAI ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-white/5 border-white/10'}`} onClick={() => setSkipAI(!skipAI)}>
-                                         <div className="flex items-center gap-3">
-                                             <Bug className={`w-4 h-4 ${skipAI ? 'text-yellow-500' : 'text-gray-500'}`} />
-                                             <span className={`text-xs font-bold ${skipAI ? 'text-yellow-500' : 'text-gray-400'}`}>跳过 AI (使用纯 DSP 算法)</span>
-                                         </div>
-                                     </div>
-                                 )}
 
                              </div>
                          ) : (

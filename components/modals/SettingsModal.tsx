@@ -225,43 +225,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                              {/* SYSTEM TAB */}
                              {activeTab === 'SYSTEM' && (
                                  <div className="space-y-6 animate-fade-in">
-                                     <SectionHeader title="服务连接" />
-                                     
-                                     {/* API Status */}
-                                     <div className={`p-6 rounded-2xl border transition-all ${apiKeyStatus === 'valid' ? 'bg-green-500/5 border-green-500/20' : apiKeyStatus === 'invalid' ? 'bg-red-500/5 border-red-500/20' : 'bg-white/5 border-white/10'}`}>
+                                     {/* Service Connection (Temporarily Disabled) */}
+                                     <div className="p-6 rounded-2xl border bg-white/5 border-white/10">
                                           <div className="flex items-center justify-between mb-2">
                                               <div className="font-bold text-white flex items-center gap-2">
-                                                  <div className={`w-2 h-2 rounded-full ${apiKeyStatus === 'valid' ? 'bg-green-500 shadow-[0_0_8px_#22c55e]' : apiKeyStatus === 'checking' ? 'bg-yellow-500 animate-pulse' : 'bg-red-500'}`}></div>
-                                                  Gemini AI 服务
+                                                  <div className="w-2 h-2 rounded-full bg-gray-500"></div>
+                                                  DSP 引擎状态
                                               </div>
-                                              <div className={`text-xs font-bold uppercase px-2 py-1 rounded bg-black/20 ${apiKeyStatus === 'valid' ? 'text-green-400' : apiKeyStatus === 'invalid' ? 'text-red-400' : 'text-gray-400'}`}>
-                                                  {apiKeyStatus === 'valid' ? '在线' : apiKeyStatus === 'checking' ? '检查中...' : apiKeyStatus === 'invalid' ? '错误' : '离线'}
+                                              <div className="text-xs font-bold uppercase px-2 py-1 rounded bg-black/20 text-green-400">
+                                                  在线
                                               </div>
                                           </div>
                                           <p className="text-xs text-gray-500 leading-relaxed pl-4 border-l-2 border-white/5">
-                                              NeonFlow 2 使用 <strong>gemini-3-flash-preview</strong> 模型进行实时谱面生成与分析。请确保您的 API Key 有效且支持该模型。
+                                              NeonFlow 2 目前纯本地运行。节奏与元数据提取直接使用客户端浏览器音频算力处理。
                                           </p>
                                      </div>
 
-                                     <div className="bg-white/5 border border-white/5 rounded-2xl p-6">
-                                         <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">API 配置</label>
-                                         <div className="relative group">
-                                             <input 
-                                                 type="password" 
-                                                 value={customApiKey}
-                                                 onChange={(e) => setCustomApiKey(e.target.value)}
-                                                 placeholder={hasEnvKey ? "已通过环境变量配置 (可覆盖)" : "在此粘贴您的 API Key (AIza...)"}
-                                                 className="w-full bg-black/40 border border-white/10 rounded-xl py-4 pl-12 pr-4 text-white text-sm focus:border-neon-blue focus:ring-1 focus:ring-neon-blue transition-all outline-none font-mono placeholder:text-gray-600 group-hover:bg-black/60"
-                                             />
-                                             <Key className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 w-5 h-5 group-focus-within:text-neon-blue transition-colors" />
-                                         </div>
-                                         {validationError && (
-                                              <div className="mt-3 p-3 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-2">
-                                                  <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                                                  <p className="text-xs text-red-300 font-medium">{validationError}</p>
-                                              </div>
-                                         )}
-                                     </div>
+
 
                                      <div className="border-t border-white/5 pt-6 space-y-4">
                                          <SectionHeader title="其他选项" />

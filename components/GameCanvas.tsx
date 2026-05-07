@@ -117,7 +117,77 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const lastFpsTimeRef = useRef(0);
   const lastFrameTimeRef = useRef(0);
 
+  const hitFlashScaleRef = useRef<number>(0); // NEW: Global hit impact flash
+
   const { playHitSound } = useSoundSystem();
+
+  const timeToDistMap = useMemo(() => {
+      if (!structure?.sections || structure.sections.length === 0) return null;
+      
+      const sorted = [...structure.sections].sort((a,b) => a.startTime - b.startTime);
+      let currentDist = 0;
+      const points: { time: number, dist: number, sv: number }[] = [];
+      points.push({ time: 0, dist: 0, sv: 1.0 });
+  
+      let lastTime = 0;
+      for (const sec of sorted) {
+          if (sec.startTime > lastTime) {
+             currentDist += (sec.startTime - lastTime) * 1.0;
+             points.push({ time: sec.startTime, dist: currentDist, sv: 1.0 });
+          }
+          
+          let sv = 1.0;
+          if (sec.intensity < 0.4) sv = 0.5; // Slow down significantly during slow parts
+          else if (sec.intensity < 0.6) sv = 0.8;
+          else if (sec.intensity > 0.8) sv = 1.3; // Speed up during drops
+          
+          currentDist += (sec.endTime - sec.startTime) * sv;
+          points.push({ time: sec.endTime, dist: currentDist, sv });
+          lastTime = sec.endTime;
+      }
+      
+      points.push({ time: 99999, dist: currentDist + (99999 - lastTime) * 1.0, sv: 1.0 });
+      return points;
+  }, [structure]);
+
+  const specialModifiers = useMemo(() => {
+      const mods = new Map<string, string>();
+      let lastTime = -5; // Allow the very first note of the song to trigger it if energy is high!
+      const sorted = [...notes].sort((a,b) => a.time - b.time);
+      for (let i=0; i<sorted.length; i++) {
+          const n = sorted[i];
+          const hasEnergy = n.energy !== undefined;
+          const energy = hasEnergy ? n.energy! : 0.8; // Fallback for old songs
+          
+          if (n.time - lastTime > 1.2 && energy > 0.6) {
+              // Found a drop-in zero-frame start!
+              mods.set(n.id, 'drop-in');
+          }
+          // Do not update lastTime if they are chord notes exactly at the same time
+          if (i === 0 || Math.abs(n.time - sorted[i-1].time) > 0.05) {
+              lastTime = n.time;
+          }
+      }
+      return mods;
+  }, [notes]);
+
+  const getMappedTime = (t: number) => {
+      if (!timeToDistMap) return t;
+      let p1 = timeToDistMap[0];
+      for (let i = 1; i < timeToDistMap.length; i++) {
+          if (timeToDistMap[i].time > t) {
+              return p1.dist + (t - p1.time) * p1.sv;
+          }
+          p1 = timeToDistMap[i];
+      }
+      return t;
+  };
+
+  const getVisualGap = (noteT: number, gameT: number, noteId: string) => {
+      // Temporarily disable SV and drop-in effects due to flickering bugs.
+      // Logic remains in beatmapGenerator.ts but is ignored during render.
+      return noteT - gameT;
+  };
 
   // Memoize safe theme to prevent flickering colors
   const safeTheme = useMemo(() => ({
@@ -125,6 +195,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       primaryColor: ensureContrast(theme.primaryColor, '#00f3ff'),
       secondaryColor: ensureContrast(theme.secondaryColor, '#bd00ff')
   }), [theme]);
+
+  // Create refs for props to avoid stale closures in gameLoop
+  const audioOffsetRef = useRef(audioOffset);
+  audioOffsetRef.current = audioOffset;
+  const hideNotesRef = useRef(hideNotes);
+  hideNotesRef.current = hideNotes;
+  const showKeysRef = useRef(showKeys);
+  showKeysRef.current = showKeys;
+
+  const safeThemeRef = useRef(safeTheme);
+  safeThemeRef.current = safeTheme;
 
   useEffect(() => {
       if (modifiers.includes(GameModifier.DoubleTime)) playbackRateRef.current = 1.5;
@@ -147,7 +228,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       const outputLatency = (ctx as any).outputLatency || 0;
       const baseLatency = (ctx as any).baseLatency || 0;
       const realTimeElapsed = ctx.currentTime - startTimeRef.current;
-      return (realTimeElapsed * playbackRateRef.current) - (audioOffset / 1000) - (outputLatency + baseLatency);
+      return (realTimeElapsed * playbackRateRef.current) - (audioOffsetRef.current / 1000) - (outputLatency + baseLatency);
   };
 
   const processHit = (lane: number) => {
@@ -190,7 +271,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       scoreRef.current.hitHistory.push(diff);
       triggerHitVisuals(lane, type);
 
-      if (hideNotes) {
+      if (hideNotesRef.current) {
           const g = ghostNotePoolRef.current.get();
           g.reset(lane, hitNote.time - gameTime, 1.0);
           ghostNotesRef.current.push(g);
@@ -297,9 +378,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
   // --- Offscreen Buffering Logic ---
   const updateStaticLayer = () => {
+      const { width, height, dpr } = sizeRef.current;
+      if (width === 0 || height === 0) return;
+      
       if (!staticCanvasRef.current) staticCanvasRef.current = document.createElement('canvas');
       const cvs = staticCanvasRef.current;
-      const { width, height, dpr } = sizeRef.current;
       
       if (cvs.width !== Math.floor(width * dpr) || cvs.height !== Math.floor(height * dpr)) {
           cvs.width = Math.floor(width * dpr);
@@ -329,7 +412,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.fillRect(startX + count * laneW, 0, 1, height);
 
       // Draw Key Labels if enabled and NOT mobile
-      if (showKeys && !isMobileRef.current && labelsRef.current.length > 0) {
+      if (showKeysRef.current && !isMobileRef.current && labelsRef.current.length > 0) {
           const hitLineY = height * 0.80; // Standard desktop hit line
           ctx.font = 'bold 24px monospace';
           ctx.textAlign = 'center';
@@ -415,10 +498,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       playHitSound(type);
       laneHitStateRef.current[lane] = 1.0; 
       comboScaleRef.current = 1.4;
+      hitFlashScaleRef.current = Math.min(1.0, hitFlashScaleRef.current + (isPerfect ? 0.4 : 0.2));
       const { height } = sizeRef.current;
       const laneX = (startXRef.current + lane * laneWidthRef.current + laneWidthRef.current / 2);
       const hitY = height * (isMobileRef.current ? 0.85 : 0.80);
-      const hitColor = isPerfect ? safeTheme.perfectColor : safeTheme.goodColor;
+      const hitColor = isPerfect ? safeThemeRef.current.perfectColor : safeThemeRef.current.goodColor;
       
       const pCount = isMobileRef.current ? (isPerfect ? 10 : 6) : (isPerfect ? 20 : 12);
       for (let i = 0; i < pCount; i++) {
@@ -445,8 +529,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0); 
       ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(p, p, boxW, boxH);
-      ctx.strokeStyle = safeTheme.primaryColor; ctx.lineWidth = 1; ctx.strokeRect(p, p, boxW, boxH);
-      ctx.font = 'bold 11px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = safeTheme.primaryColor;
+      ctx.strokeStyle = safeThemeRef.current.primaryColor; ctx.lineWidth = 1; ctx.strokeRect(p, p, boxW, boxH);
+      ctx.font = 'bold 11px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = safeThemeRef.current.primaryColor;
       ctx.fillText(`FPS: ${fpsRef.current}`, p + 10, p + 10);
       ctx.fillText(`Frame Time: ${frameTime.toFixed(2)}ms`, p + 10, p + 25);
       ctx.fillStyle = '#fff';
@@ -479,6 +563,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     if (!ctx) return;
 
     const { width, height, dpr } = sizeRef.current;
+    if (width === 0 || height === 0) {
+        requestRef.current = requestAnimationFrame(gameLoop);
+        return;
+    }
     if (canvas.width !== Math.floor(width * dpr)) {
         canvas.width = Math.floor(width * dpr); canvas.height = Math.floor(height * dpr);
         canvas.style.width = `${width}px`; canvas.style.height = `${height}px`;
@@ -497,11 +585,19 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     const hitLineY = height * hitLineRatio;
 
     let targetIntensity = 0;
+    let isDrop = false;
+    let isBuild = false;
     if (structure?.sections) {
         const currentSection = structure.sections.find(s => gameTime >= s.startTime && gameTime < s.endTime);
         if (currentSection) {
             targetIntensity = currentSection.intensity;
-            if (currentSection.type === 'chorus' || currentSection.type === 'drop') targetIntensity = Math.max(targetIntensity, 1.2); 
+            if (currentSection.type === 'chorus' || currentSection.type === 'drop') {
+                targetIntensity = Math.max(targetIntensity, 1.2); 
+                isDrop = true;
+            }
+            if (currentSection.type === 'build') {
+                isBuild = true;
+            }
         }
     }
     
@@ -515,25 +611,53 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         beatPulse = Math.pow(1 - (gameTime % beatDur) / beatDur, 2); 
     }
 
+    // --- Performance Animation: Camera Shake & Bob ---
+    if (!isFrozen) {
+        if (isDrop) {
+            // Rhythmic downbeat bounce
+            const bounce = beatPulse * (isMobileRef.current ? 5 : 10) * visualIntensity;
+            ctx.translate(0, bounce);
+        } else if (isBuild) {
+            // Tense shivering effect
+            const phase = (gameTime * 40) % (Math.PI * 2);
+            const shake = Math.sin(phase) * (isMobileRef.current ? 1 : 2) * visualIntensity;
+            ctx.translate(shake, 0);
+        }
+        
+        // Add Impact Shake from Chord Hits
+        if (hitFlashScaleRef.current > 0.1) {
+             const impactShakeX = (Math.random() - 0.5) * hitFlashScaleRef.current * 10;
+             const impactShakeY = (Math.random() - 0.5) * hitFlashScaleRef.current * 10;
+             ctx.translate(impactShakeX, impactShakeY);
+        }
+    }
+
     const bgGrad = ctx.createLinearGradient(0, 0, 0, height);
     bgGrad.addColorStop(0, '#13131f'); bgGrad.addColorStop(1, '#050508');
     ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, width, height);
 
     ctx.globalAlpha = 0.08;
     const baseAmbient = ctx.createRadialGradient(width/2, height/2, width*0.1, width/2, height/2, width*0.8);
-    baseAmbient.addColorStop(0, safeTheme.secondaryColor); baseAmbient.addColorStop(1, 'transparent');
+    baseAmbient.addColorStop(0, safeThemeRef.current.secondaryColor); baseAmbient.addColorStop(1, 'transparent');
     ctx.fillStyle = baseAmbient; ctx.fillRect(0, 0, width, height);
     ctx.globalAlpha = 1.0;
     
     const baseOpacity = visualIntensity * 0.25;
     const kiaiStrength = Math.max(0, (visualIntensity - 0.6) / 0.6); 
     const kiaiBoost = kiaiStrength * (beatPulse * 0.2);
-    const finalOpacity = Math.min(0.7, baseOpacity + kiaiBoost);
+    // Add hit flash to global ambient lighting
+    const flashBoost = hitFlashScaleRef.current * 0.3;
+    const finalOpacity = Math.min(0.8, baseOpacity + kiaiBoost + flashBoost);
+
+    if (!isFrozen && hitFlashScaleRef.current > 0) {
+        hitFlashScaleRef.current -= 0.05;
+        if (hitFlashScaleRef.current < 0) hitFlashScaleRef.current = 0;
+    }
     
     if (finalOpacity > 0.01) {
         ctx.globalAlpha = finalOpacity;
-        const priRgb = hexToRgb(safeTheme.primaryColor);
-        const secRgb = hexToRgb(safeTheme.secondaryColor);
+        const priRgb = hexToRgb(safeThemeRef.current.primaryColor);
+        const secRgb = hexToRgb(safeThemeRef.current.secondaryColor);
         const mix = Math.min(1, Math.max(0, visualIntensity - 0.2) * 1.2);
         const r = Math.round(secRgb.r + (priRgb.r - secRgb.r) * mix);
         const g = Math.round(secRgb.g + (priRgb.g - secRgb.g) * mix);
@@ -545,13 +669,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.globalAlpha = 1.0;
     }
     
-    if (staticCanvasRef.current) ctx.drawImage(staticCanvasRef.current, 0, 0, width, height);
-    else layoutDirtyRef.current = true;
+    if (staticCanvasRef.current && staticCanvasRef.current.width > 0 && staticCanvasRef.current.height > 0) {
+        ctx.drawImage(staticCanvasRef.current, 0, 0, width, height);
+    } else layoutDirtyRef.current = true;
 
     const hitBarAlpha = 0.4 + beatPulse * 0.3;
-    ctx.fillStyle = `${safeTheme.primaryColor}${Math.floor(hitBarAlpha * 255).toString(16).padStart(2,'0')}`;
+    ctx.fillStyle = `${safeThemeRef.current.primaryColor}${Math.floor(hitBarAlpha * 255).toString(16).padStart(2,'0')}`;
     ctx.fillRect(startX, hitLineY - 1, count * laneW, 2);
-    ctx.fillStyle = `${safeTheme.primaryColor}22`;
+    ctx.fillStyle = `${safeThemeRef.current.primaryColor}22`;
     ctx.fillRect(startX, hitLineY - 3, count * laneW, 6);
 
     for (let i = 0; i < count; i++) {
@@ -564,14 +689,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         if (laneHitStateRef.current[i] > 0) {
             const alpha = laneHitStateRef.current[i];
             const grad = ctx.createLinearGradient(x, hitLineY, x, hitLineY - 300); 
-            grad.addColorStop(0, `${safeTheme.primaryColor}${Math.floor(alpha * 100).toString(16).padStart(2,'0')}`);
+            grad.addColorStop(0, `${safeThemeRef.current.primaryColor}${Math.floor(alpha * 100).toString(16).padStart(2,'0')}`);
             grad.addColorStop(1, 'rgba(0,0,0,0)');
             ctx.fillStyle = grad;
             ctx.fillRect(x, hitLineY - 300, laneW, 300);
             if (!isFrozen) laneHitStateRef.current[i] = Math.max(0, alpha - 0.1);
         }
         if (keyStateRef.current[i] || (isAutoRef.current && laneHitStateRef.current[i] > 0.5)) {
-            ctx.fillStyle = `${safeTheme.primaryColor}22`; 
+            ctx.fillStyle = `${safeThemeRef.current.primaryColor}22`; 
             ctx.fillRect(x, hitLineY - 150, laneW, 150);
         }
     }
@@ -583,30 +708,71 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     // Note: This check runs every frame, could be optimized, but notes array is usually < 2000.
     // Ideally we should pre-sort or use layers. For now, we iterate and draw selectively.
     
+    // 0. Chord Lines Indicator (多押提示)
+    if (!hideNotesRef.current) {
+        const visibleNotes = notesRef.current.filter(n => (n.visible || n.missed) && !n.isHolding && n.type !== 'CATCH');
+        const chords = new Map<number, Note[]>();
+        for (const note of visibleNotes) {
+            const timeKey = Math.round(note.time * 100); // cluster by 10ms
+            const prev = chords.get(timeKey) || [];
+            prev.push(note);
+            chords.set(timeKey, prev);
+        }
+        
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = `rgba(255, 255, 255, 0.4)`;
+        ctx.lineCap = 'round';
+        for (const [timeKey, chordNotes] of chords.entries()) {
+            if (chordNotes.length > 1) {
+                const time = chordNotes[0].time;
+                const headY = hitLineY - getVisualGap(time, gameTime, chordNotes[0].id) * speed;
+                if (headY < viewLimitTop || headY > viewLimitBottom) continue;
+                
+                const minLane = Math.min(...chordNotes.map(n => n.lane));
+                const maxLane = Math.max(...chordNotes.map(n => n.lane));
+                
+                const startXPos = startX + minLane * laneW + laneW / 2;
+                const endXPos = startX + maxLane * laneW + laneW / 2;
+                
+                ctx.beginPath();
+                ctx.moveTo(startXPos, headY - 5);
+                ctx.lineTo(endXPos, headY - 5);
+                ctx.stroke();
+            }
+        }
+    }
+
     // 1. Draw Holds Bodies
     notesRef.current.forEach(note => {
         if (!note.visible && !note.missed) return;
         if (note.duration === 0) return; // Skip normal notes for now
 
-        const headY = hitLineY - (note.time - gameTime) * speed; 
-        const tailY = headY - note.duration * speed;
+        const headY = hitLineY - getVisualGap(note.time, gameTime, note.id) * speed; 
+        const tailY = hitLineY - getVisualGap(note.time + note.duration, gameTime, note.id) * speed;
         if (headY < viewLimitTop || tailY > viewLimitBottom) return; 
 
-        if (hideNotes && !note.missed) return;
+        if (hideNotesRef.current && !note.missed) return;
 
-        const noteX = startX + note.lane * laneW + 4;
+        let noteAnimOffsetX = 0;
+        if (!isFrozen && hitLineY - headY > 0) { 
+            const distRatio = Math.max(0, Math.min(1, (hitLineY - headY) / hitLineY));
+            noteAnimOffsetX = Math.sin(gameTime * 15 + note.time * 10 + note.lane) * (1.5 * visualIntensity) * distRatio;
+        }
+
+        const noteX = startX + note.lane * laneW + 4 + noteAnimOffsetX;
         const noteW = laneW - 8;
         
         let drawHeadY = headY;
-        let drawHeight = note.duration * speed;
+        let drawTailY = tailY;
         if (note.isHolding) { 
             drawHeadY = hitLineY; 
-            drawHeight = Math.max(0, (note.time + note.duration - gameTime) * speed); 
+            drawTailY = hitLineY - getVisualGap(note.time + note.duration, gameTime, note.id) * speed; 
         }
+        let drawHeight = Math.max(0, drawHeadY - drawTailY);
         const tailW = noteW * 0.8; const tailX = noteX + (noteW - tailW) / 2;
-        ctx.fillStyle = note.missed ? '#44444444' : `${safeTheme.secondaryColor}44`;
+        ctx.fillStyle = note.missed ? '#44444444' : `${safeThemeRef.current.secondaryColor}44`;
         ctx.fillRect(tailX, drawHeadY - drawHeight, tailW, drawHeight);
-        ctx.fillStyle = note.missed ? '#444' : safeTheme.secondaryColor;
+        ctx.fillStyle = note.missed ? '#444' : safeThemeRef.current.secondaryColor;
         ctx.fillRect(tailX, drawHeadY - drawHeight - 2, tailW, 4); 
     });
 
@@ -673,7 +839,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                     // Holding Effect
                     if (Math.random() > 0.6) {
                         const p = particlePoolRef.current.get();
-                        p.reset((startX + note.lane * laneW + laneW / 2), hitLineY, safeTheme.secondaryColor);
+                        p.reset((startX + note.lane * laneW + laneW / 2), hitLineY, safeThemeRef.current.secondaryColor);
                         particlesRef.current.push(p);
                     }
                     
@@ -693,40 +859,92 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             }
         }
         
-        const headY = hitLineY - (note.time - gameTime) * speed; 
+        const headY = hitLineY - getVisualGap(note.time, gameTime, note.id) * speed; 
         
         // Skip drawing if out of view (for non-holding notes)
         if (headY < viewLimitTop || headY > viewLimitBottom) return;
-        if (hideNotes && !note.missed) return;
+        if (hideNotesRef.current && !note.missed) return;
 
-        const noteX = startX + note.lane * laneW + 4;
+        let noteAnimOffsetX = 0;
+        let noteAnimOffsetY = 0;
+        if (!isFrozen && hitLineY - headY > 0) { 
+            const distRatio = Math.max(0, Math.min(1, (hitLineY - headY) / hitLineY));
+            if (note.duration === 0 && note.type !== 'CATCH') {
+                noteAnimOffsetX = Math.sin(gameTime * 15 + note.time * 10 + note.lane) * (1.5 * visualIntensity) * distRatio;
+                noteAnimOffsetY = Math.cos(gameTime * 20 + note.time * 20) * (1 * visualIntensity) * distRatio;
+            }
+        }
+
+        const noteX = startX + note.lane * laneW + 4 + noteAnimOffsetX;
         const noteW = laneW - 8;
+        const drawHeadY = headY + noteAnimOffsetY;
         let opacity = 1.0;
-        if (isHiddenRef.current && !note.missed && !note.isHolding) opacity = Math.max(0, Math.min(1, (hitLineY - headY - 100) / 300));
+        if (isHiddenRef.current && !note.missed && !note.isHolding) opacity = Math.max(0, Math.min(1, (hitLineY - drawHeadY - 100) / 300));
 
-        let noteColor = safeTheme.primaryColor; 
+        let noteColor = safeThemeRef.current.primaryColor; 
         if (note.missed) noteColor = '#444444';
-        else if (note.type === 'CATCH') noteColor = safeTheme.catchColor || '#f9f871';
-        else if (note.duration > 0) noteColor = safeTheme.secondaryColor;
+        else if (note.type === 'CATCH') noteColor = safeThemeRef.current.catchColor || '#f9f871';
+        else if (note.duration > 0) noteColor = safeThemeRef.current.secondaryColor;
 
+        // --- Audio Feature Visuals ---
+        let dynamicW = noteW;
+        let dynamicX = noteX;
+        let isTonal = false;
+        
+        if (!note.missed && note.energy !== undefined && note.zcr !== undefined) {
+             // Energy scales the note slightly
+             const energyBoost = note.energy * 6;
+             dynamicW += energyBoost;
+             dynamicX -= energyBoost / 2;
+             
+             // High ZCR (noise) adds extreme jitter, Low ZCR (bass) adds a subtle glow
+             if (note.zcr > 0.4 && !isFrozen) {
+                 dynamicX += (Math.random() - 0.5) * 4 * note.zcr;
+             }
+             if (note.zcr < 0.15) {
+                 isTonal = true; 
+             }
+        }
+        
         ctx.globalAlpha = note.missed ? 0.4 : opacity;
+        
+        if (isTonal && !note.missed) {
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = noteColor;
+        } else {
+            ctx.shadowBlur = 0;
+        }
 
         // Draw Head (Only if not holding or it's a catch/tap)
         if (!note.isHolding || note.type === 'CATCH') {
             if (note.type === 'CATCH') {
-                const cx = noteX + noteW / 2; const cy = headY;
+                const cx = dynamicX + dynamicW / 2; const cy = drawHeadY;
                 ctx.fillStyle = noteColor;
-                ctx.beginPath(); ctx.moveTo(cx, cy - 10); ctx.lineTo(cx + 12, cy); ctx.lineTo(cx, cy + 10); ctx.lineTo(cx - 12, cy); ctx.closePath(); ctx.fill();
+                ctx.beginPath();
+                if (ctx.roundRect) {
+                    ctx.roundRect(dynamicX + 4, drawHeadY - 6, dynamicW - 8, 12, 6);
+                } else {
+                    ctx.fillRect(dynamicX + 4, drawHeadY - 6, dynamicW - 8, 12);
+                }
+                ctx.fill();
+                
                 ctx.fillStyle = '#FFF';
-                ctx.beginPath(); ctx.moveTo(cx, cy - 4); ctx.lineTo(cx + 4, cy); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 4, cy); ctx.closePath(); ctx.fill();
+                ctx.beginPath();
+                if (ctx.roundRect) {
+                    ctx.roundRect(dynamicX + 8, drawHeadY - 2, dynamicW - 16, 4, 2);
+                } else {
+                    ctx.fillRect(dynamicX + 8, drawHeadY - 2, dynamicW - 16, 4);
+                }
+                ctx.fill();
             } else {
                 ctx.fillStyle = noteColor;
-                ctx.fillRect(noteX, headY - 5, noteW, 10);
+                ctx.fillRect(dynamicX, drawHeadY - 5, dynamicW, 10);
                 ctx.fillStyle = 'rgba(255,255,255,0.4)';
-                ctx.fillRect(noteX, headY - 5, noteW, 2);
+                ctx.fillRect(dynamicX, drawHeadY - 5, dynamicW, 2);
             }
         } 
         ctx.globalAlpha = 1.0;
+        ctx.shadowBlur = 0;
     });
 
     if (isFlashlightRef.current) {
@@ -743,7 +961,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     for (let i = activeGhosts.length - 1; i >= 0; i--) {
         const g = activeGhosts[i];
         const y = hitLineY - (g.timeDiff * speed);
-        ctx.globalAlpha = g.life * 0.4; ctx.fillStyle = safeTheme.secondaryColor;
+        ctx.globalAlpha = g.life * 0.4; ctx.fillStyle = safeThemeRef.current.secondaryColor;
         ctx.fillRect(startX + g.lane * laneW + 4, y - 6, laneW - 8, 12);
         ctx.globalAlpha = 1.0; 
         
@@ -788,7 +1006,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
     const progress = Math.min(1, Math.max(0, gameTime) / (audioBuffer?.duration || 1));
     ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.fillRect(0, 0, width, 4);
-    ctx.fillStyle = safeTheme.primaryColor; ctx.fillRect(0, 0, width * progress, 4);
+    ctx.fillStyle = safeThemeRef.current.primaryColor; ctx.fillRect(0, 0, width * progress, 4);
 
     drawSystemStats(ctx, width, height, performance.now());
 

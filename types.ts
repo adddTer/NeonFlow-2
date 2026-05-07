@@ -47,6 +47,11 @@ export interface Note {
   isHolding: boolean; // 是否正在被按住
   type: NoteType; // 新增：音符类型
   missed?: boolean; // 新增：是否已判定为 Miss (用于视觉变灰)
+  
+  // Audio Features for Visuals
+  pitch?: number;
+  zcr?: number;
+  energy?: number;
 }
 
 // DSP 层输出：原始节奏点
@@ -54,6 +59,9 @@ export interface Onset {
   time: number;
   energy: number; // 能量值 (0-1)
   isLowFreq: boolean; // 是否是低频打击 (Kick/Bass)
+  pitch?: number; // 基础频率 (Hz)
+  zcr?: number; // 过零率，反应音色明暗
+  duration?: number; // 持续时间，用于精确生成 Hold
 }
 
 // 方向一：动态描述符

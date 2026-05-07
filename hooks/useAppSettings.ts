@@ -23,7 +23,12 @@ export const useAppSettings = () => {
     const [customApiKey, setCustomApiKey] = useState("");
     const [apiKeyStatus, setApiKeyStatus] = useState<'valid' | 'missing' | 'checking' | 'invalid'>('missing');
     const [validationError, setValidationError] = useState<string | null>(null);
-    const hasEnvKey = !!process.env.API_KEY;
+    const hasEnvKey = typeof process !== 'undefined' ? !!process.env.API_KEY : !!(import.meta as any).env?.VITE_API_KEY;
+    const hasGoogleApiKey = (typeof process !== 'undefined' ? !!process.env.GOOGLE_API_KEY : false) || 
+                            !!(import.meta as any).env?.VITE_GOOGLE_API_KEY ||
+                            (typeof process !== 'undefined' ? !!process.env.GEMINI_API_KEY : false) ||
+                            !!(import.meta as any).env?.VITE_GEMINI_API_KEY ||
+                            !!(import.meta as any).env?.DEV; // Fallback: If Vite DEV mode, also enable debug
 
     // Load Settings
     useEffect(() => {
@@ -41,7 +46,7 @@ export const useAppSettings = () => {
         }
 
         const debug = localStorage.getItem(LS_KEY_DEBUG);
-        if (debug === 'true') setIsDebugMode(true);
+        if (debug === 'true' || hasGoogleApiKey) setIsDebugMode(true);
 
         const storedKey = localStorage.getItem(LS_KEY_API);
         if (storedKey) {

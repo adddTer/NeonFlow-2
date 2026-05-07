@@ -5,10 +5,7 @@ import { useChartEditor, EditorTool, SnapDivisor } from '../../hooks/useChartEdi
 import { SavedSong, AITheme, NoteType, KeyConfig } from '../../types';
 import { Play, Pause, Save, LogOut, Plus, Trash2, MousePointer, Magnet, Clock, ChevronDown, Layers, Music, Settings2, AlertTriangle, X, Circle, Mic, Sparkles, Send, Bot, Zap, AudioWaveform, Lock } from 'lucide-react';
 import { saveSong, getSongById } from '../../services/storageService';
-import { generatePatternWithGemini } from '../../services/geminiService';
 import { useAppSettings } from '../../hooks/useAppSettings';
-import { sliceAudioBufferToWavBase64 } from '../../utils/fileUtils';
-import { getAudioBufferSlice, preprocessAudioData, computeOnsets } from '../../utils/audioAnalyzer';
 
 interface EditorScreenProps {
     song: SavedSong;
@@ -120,126 +117,8 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
 
     // --- AI Copilot Handlers ---
     const handleAiGenerate = async (overridePrompt?: string) => {
-        if (!isApiValid) return; // Guard
-        
-        const promptToUse = overridePrompt || aiPrompt;
-        if (!promptToUse.trim()) return;
-        if (effectiveAiDuration <= 0) {
-            alert("已到达音频末尾，无法生成。");
-            return;
-        }
-        
-        setAiIsLoading(true);
-        try {
-            // Determine Context
-            
-            // 1. Capture Audio Context (Context Window: Target Duration)
-            let audioContextBase64 = undefined;
-            let absoluteOnsets: { time: number, energy: number }[] = [];
-
-            if (audioBuffer) {
-                // For Sending to AI
-                audioContextBase64 = await sliceAudioBufferToWavBase64(audioBuffer, snappedStartTime, effectiveAiDuration + 0.5);
-                
-                // For Programmatic Alignment (DSP) - ALWAYS ENABLED
-                const slice = getAudioBufferSlice(audioBuffer, snappedStartTime, effectiveAiDuration);
-                const { lowData, fullData } = await preprocessAudioData(slice);
-                const rawOnsets = computeOnsets(lowData, fullData, slice.sampleRate);
-                // Convert relative slice time to absolute song time
-                absoluteOnsets = rawOnsets.map(o => ({ ...o, time: snappedStartTime + o.time }));
-            }
-
-            // 2. Capture Note Context
-            // A. Preceding notes (for flow)
-            const lookbackTime = 2 * beatDuration;
-            const precedingNotes = editor.notes
-                .filter(n => n.time >= snappedStartTime - lookbackTime && n.time < snappedStartTime)
-                .map(n => ({
-                    lane: n.lane,
-                    timeDiff: Number(((n.time - snappedStartTime) / beatDuration).toFixed(2))
-                }))
-                .sort((a,b) => a.timeDiff - b.timeDiff);
-
-            // B. Existing notes in target window (for replacement/awareness)
-            const existingNotesInWindow = editor.notes
-                .filter(n => n.time >= snappedStartTime && n.time < aiEndTime)
-                .map(n => ({
-                    lane: n.lane,
-                    beatOffset: Number(((n.time - snappedStartTime) / beatDuration).toFixed(2))
-                }));
-
-            const result = await generatePatternWithGemini(
-                promptToUse,
-                {
-                    bpm: editor.bpm,
-                    laneCount: song.laneCount,
-                    beatCount: Math.ceil(effectiveAiDuration / beatDuration),
-                    startTime: snappedStartTime
-                },
-                {
-                    audioBase64: audioContextBase64,
-                    precedingNotes: precedingNotes,
-                    existingNotesInWindow: existingNotesInWindow,
-                    structure: song.structure
-                },
-                customApiKey
-            );
-
-            // Execute Instructions sequentially
-            if (result.instructions && result.instructions.length > 0) {
-                
-                for (const instr of result.instructions) {
-                    if (instr.type === 'CLEAR') {
-                        // Delete notes in range, optionally filtering by targetLanes
-                        editor.deleteNotesInRange(snappedStartTime, aiEndTime, instr.lanes);
-                    } 
-                    else if (instr.type === 'ADD' && instr.notes) {
-                        const notesToAdd: { time: number, lane: number, duration: number }[] = [];
-                        
-                        for (const n of instr.notes) {
-                            let time = snappedStartTime + (n.beatOffset * beatDuration);
-                            
-                            // Programmatic Alignment Logic (Always On)
-                            if (absoluteOnsets.length > 0) {
-                                // Find closest onset within tolerance (150ms)
-                                const snapWindow = 0.15;
-                                let bestOnset = null;
-                                let minDiff = snapWindow;
-
-                                for (const onset of absoluteOnsets) {
-                                    const diff = Math.abs(onset.time - time);
-                                    if (diff < minDiff) {
-                                        minDiff = diff;
-                                        bestOnset = onset;
-                                    }
-                                }
-
-                                if (bestOnset) {
-                                    time = bestOnset.time;
-                                }
-                            }
-                            
-                            // Additional Safety: Clamp time to selected region
-                            if (time < snappedStartTime) time = snappedStartTime;
-                            if (time > aiEndTime) continue; // Skip if snapped outside
-
-                            notesToAdd.push({
-                                time,
-                                lane: n.lane,
-                                duration: n.duration * beatDuration
-                            });
-                        }
-                        
-                        editor.bulkAddNotes(notesToAdd);
-                    }
-                }
-            }
-        } catch (error) {
-            console.error("Copilot Error:", error);
-            alert("AI 生成失败，请检查 API Key 或网络连接。");
-        } finally {
-            setAiIsLoading(false);
-        }
+        alert("AI 介入已暂时移除 (AI is temporarily disabled)。");
+        return;
     };
 
     // --- Live Recording Logic ---
@@ -454,16 +333,9 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
                     <div className="flex border-b border-white/5 bg-[#111]">
                         <button 
                             onClick={() => setActiveTab('PROPS')}
-                            className={`flex-1 py-3 text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 border-b-2 transition-all ${activeTab === 'PROPS' ? 'text-white border-white' : 'text-gray-600 border-transparent hover:text-gray-400'}`}
+                            className={`flex-[2] py-3 text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 border-b-2 transition-all ${activeTab === 'PROPS' ? 'text-white border-white' : 'text-gray-600 border-transparent hover:text-gray-400'}`}
                         >
-                            <Settings2 className="w-3 h-3" /> 属性
-                        </button>
-                        <button 
-                            onClick={() => setActiveTab('COPILOT')}
-                            className={`flex-1 py-3 text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 border-b-2 transition-all ${activeTab === 'COPILOT' ? 'text-neon-purple border-neon-purple' : 'text-gray-600 border-transparent hover:text-gray-400'}`}
-                        >
-                            <Sparkles className="w-3 h-3" /> AI Copilot 
-                            <span className="bg-neon-purple/20 text-neon-purple border border-neon-purple/50 px-1.5 py-0.5 rounded text-[8px] font-bold">BETA</span>
+                            <Settings2 className="w-3 h-3" /> 属性设置
                         </button>
                     </div>
                     

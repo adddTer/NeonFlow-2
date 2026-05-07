@@ -36,45 +36,60 @@ export interface BeatmapFeatures {
     catch: boolean;
 }
 
-const alignOnsetsLocal = (onsets: Onset[], bpm: number): Onset[] => {
+const quantizeOnsets = (onsets: Onset[], bpm: number): Onset[] => {
     if (onsets.length < 2) return onsets;
-    const sorted = [...onsets].sort((a, b) => a.time - b.time);
-    const aligned: Onset[] = [];
-    const groupingThreshold = 0.02;
+    const beatDur = 60 / bpm;
+    
+    // Snap resolution: 1/24th of a beat covers 1/2, 1/3, 1/4, 1/6, 1/8 notes.
+    const tickDur = beatDur / 24;
+    
+    // Find strong anchor points throughout the song to create a rolling phase map
+    // Instead of a single global offset, we use robust local offsets to prevent tempo drift
+    const strongHits = onsets.filter(o => o.isLowFreq && o.energy > 0.7).sort((a,b) => a.time - b.time);
+    const quantizedMap = new Map<number, Onset>();
+    
+    for (const onset of onsets) {
+        // Find nearest strong hit to act as an anchor
+        let nearestAnchorTime = onset.time;
+        if (strongHits.length > 0) {
+            let closest = strongHits[0];
+            let minDiff = Math.abs(onset.time - closest.time);
+            for (let i = 1; i < strongHits.length; i++) {
+                const diff = Math.abs(onset.time - strongHits[i].time);
+                if (diff < minDiff) { minDiff = diff; closest = strongHits[i]; }
+            }
+            // Only use as anchor if it aligns somewhat with the beat grid
+            nearestAnchorTime = closest.time;
+        }
 
-    let i = 0;
-    while (i < sorted.length) {
-        const group = [sorted[i]];
-        let j = i + 1;
-        while (j < sorted.length) {
-            const delta = sorted[j].time - sorted[j-1].time;
-            if (delta > 1.0) break;
-            if (group.length > 1) {
-                const prevDelta = group[group.length-1].time - group[group.length-2].time;
-                if (Math.abs(delta - prevDelta) < groupingThreshold) {
-                    group.push(sorted[j]);
-                    j++;
-                    continue;
-                }
-            }
-            if (group.length === 1 && delta < 0.5) {
-                group.push(sorted[j]);
-                j++;
-                continue;
-            }
-            break;
+        const offset = nearestAnchorTime % tickDur; 
+        const rel = onset.time - offset;
+        const ticks = Math.round(rel / tickDur);
+        let snappedTime = offset + ticks * tickDur;
+        
+        // If the note is very close to a snap point, snap it. Otherwise, keep its original time (organic groove)
+        if (Math.abs(snappedTime - onset.time) > 0.05) {
+             snappedTime = onset.time;
         }
-        if (group.length >= 3) {
-            let totalDelta = 0;
-            for(let k=1; k<group.length; k++) totalDelta += group[k].time - group[k-1].time;
-            const avgDelta = totalDelta / (group.length - 1);
-            const anchorTime = group[0].time;
-            for(let k=0; k<group.length; k++) group[k].time = anchorTime + (k * avgDelta);
+        
+        // Clean floating point errors
+        snappedTime = Math.round(snappedTime * 1000) / 1000;
+        
+        // Prevent negative times
+        if (snappedTime < 0) snappedTime = onset.time;
+
+        if (quantizedMap.has(snappedTime)) {
+             const existing = quantizedMap.get(snappedTime)!;
+             // Merge simultaneously snapped onsets
+             existing.energy = Math.max(existing.energy, onset.energy);
+             if (onset.isLowFreq) existing.isLowFreq = true;
+             existing.pitch = (onset.energy > existing.energy) ? onset.pitch : existing.pitch;
+        } else {
+             quantizedMap.set(snappedTime, { ...onset, time: snappedTime });
         }
-        aligned.push(...group);
-        i = j;
     }
-    return aligned.filter((o, idx, arr) => idx === 0 || o.time > arr[idx-1].time + 0.005);
+    
+    return Array.from(quantizedMap.values()).sort((a,b) => a.time - b.time);
 };
 
 class ErgonomicPhysics {
@@ -82,9 +97,9 @@ class ErgonomicPhysics {
     private bias: string;
     private lastLanes: number[] = [2];
     private lastTime: number = 0;
-    private lastFlowDirection: number = 0;
     private leftHandStrain: number = 0;
     private rightHandStrain: number = 0;
+    private momentum: number = 0; // Traces movement flow
     
     public heldLanes: number[] = []; // Track currently holding lanes
 
@@ -108,7 +123,7 @@ class ErgonomicPhysics {
         this.rightHandStrain = Math.max(0, this.rightHandStrain - decay);
     }
 
-    getCost(targetLanes: number[], currentTime: number, style: string, flow: string, allowOverlap: boolean): number {
+    getCost(targetLanes: number[], currentTime: number, style: string, flow: string, allowOverlap: boolean, preferredLane?: number): number {
         // Forbidden to generate on currently held lanes, unless overlap is explicitly allowed (e.g. Catch notes)
         if (!allowOverlap) {
             for (const lane of targetLanes) {
@@ -124,41 +139,42 @@ class ErgonomicPhysics {
         const currAvg = targetLanes.reduce((a,b)=>a+b,0) / targetLanes.length;
         const movement = currAvg - prevAvg;
         
-        // --- MOVEMENT COST ADJUSTMENT ---
-        let movementCostMultiplier = 1.5;
+        // --- FLUID MOMENTUM COST ---
+        // Reward continuing movement in the same direction, penalize sudden stops/reversals 
+        // unless it's a jump style or the boundary is reached
+        const expectedMovement = this.momentum;
+        let flowPenalty = 0;
         
-        // If Style is 'jump' or Flow is 'random', we WANT movement and chaos.
-        if (style === 'jump' || flow === 'random') {
-            // Penalize small movements to force jumps/chaos
-            if (Math.abs(movement) < 1.0) cost += 3.0; // "Too close" penalty
-            movementCostMultiplier = 0.1; // Reduce distance penalty significantly
-        } 
-        // If Style is 'stream', we want small movements (flow)
-        else if (style === 'stream') {
-            movementCostMultiplier = 2.0; // High penalty for large jumps
+        if (style === 'stream' || flow === 'linear') {
+            // Reward smooth continuous motion
+            if (movement * expectedMovement > 0) flowPenalty -= 1.5; // same direction
+            if (movement === 0) flowPenalty += 1.0; 
+        } else if (style === 'jump' || flow === 'random') {
+            // Reward breaks in momentum
+            if (Math.abs(movement) < 1.5) flowPenalty += 2.0;
+            if (movement * expectedMovement < 0) flowPenalty -= 1.0; // zigzag/bounce
         }
+        
+        cost += flowPenalty;
 
-        cost += Math.abs(movement) * movementCostMultiplier;
-
-        // Flow Break Penalty
-        if ((this.lastFlowDirection > 0 && movement > 0) || (this.lastFlowDirection < 0 && movement < 0)) {
-            // Reward maintaining direction in stream
-            if (style === 'stream' || flow === 'linear') cost -= 1.5;
-        } else {
-             // Changing direction
-             if (style === 'jump' || flow === 'zigzag' || flow === 'random') {
-                 // Reward direction changes for jump/zigzag/random
-                 cost -= 1.0; 
-             }
-        }
+        // --- DISTANCE PENALTY ---
+        let distanceMultiplier = style === 'jump' ? 0.2 : (style === 'stream' ? 2.5 : 1.0);
+        cost += Math.abs(movement) * distanceMultiplier;
 
         // Jackhammer Penalty (Repeated Notes)
-        const isJackAllowed = style === 'jump' || flow === 'random';
+        const isJackAllowed = style === 'jump' || flow === 'random' || timeDelta > 0.25;
         for (const lane of targetLanes) {
             if (this.lastLanes.includes(lane)) {
                 if (timeDelta < 0.15 && !isJackAllowed) return 9999; 
-                cost += (0.3 / timeDelta) * 5; 
+                cost += (0.2 / timeDelta) * 3; 
             }
+        }
+
+        // Pitch Preferred Lane Synergy (Soft Guidance)
+        if (preferredLane !== undefined && targetLanes.length === 1) {
+            const lane = targetLanes[0];
+            const dist = Math.abs(lane - preferredLane);
+            cost += dist * 0.8; // Reduced weight to let flow dominate
         }
 
         // Hand Balance & Bias
@@ -187,8 +203,8 @@ class ErgonomicPhysics {
         const currAvg = lanes.reduce((a,b)=>a+b,0) / lanes.length;
         const movement = currAvg - prevAvg;
         
-        if (movement > 0.1) this.lastFlowDirection = 1;
-        else if (movement < -0.1) this.lastFlowDirection = -1;
+        // Exponential moving average for momentum
+        this.momentum = this.momentum * 0.4 + movement * 0.6;
 
         lanes.forEach(lane => {
             if (this.getHand(lane) === 'LEFT') this.leftHandStrain += 1.0;
@@ -199,7 +215,7 @@ class ErgonomicPhysics {
         this.lastTime = currentTime;
     }
 
-    getBestLanes(count: number, currentTime: number, maxCost: number, style: string, flow: string, allowOverlap: boolean = false): number[] {
+    getBestLanes(count: number, currentTime: number, maxCost: number, style: string, flow: string, allowOverlap: boolean = false, preferredLane?: number): number[] {
         // Filter out held lanes from candidates ONLY if overlap is NOT allowed
         const allLanes = Array.from({length: this.laneCount}, (_, i) => i)
             .filter(l => allowOverlap || !this.heldLanes.includes(l));
@@ -230,7 +246,16 @@ class ErgonomicPhysics {
         candidates.sort(() => Math.random() - 0.5);
 
         for (const chord of candidates) {
-            const cost = this.getCost(chord, currentTime, style, flow, allowOverlap); 
+            let cost = this.getCost(chord, currentTime, style, flow, allowOverlap, preferredLane); 
+            
+            // HUMAN FEEL: symmetric chords feel extremely satisfying in 4-lane
+            if (this.laneCount === 4 && chord.length === 2) {
+                const isSymmetric = (chord.includes(0) && chord.includes(3)) || (chord.includes(1) && chord.includes(2));
+                if (isSymmetric) {
+                    cost -= 2.0; // Big reward for symmetry
+                }
+            }
+
             if (cost < minCandidateCost) {
                 minCandidateCost = cost;
                 bestCandidate = chord;
@@ -312,14 +337,43 @@ export const generateBeatmap = (
         }
     }
 
-    const onsets = alignOnsetsLocal(rawOnsets, structure.bpm);
+    const onsets = quantizeOnsets(rawOnsets, structure.bpm);
     const config = getDifficultyConfig(numericDiff);
     const physics = new ErgonomicPhysics(laneCount);
+
+    // 1. Calculate pitch distribution to assign tracks dynamically but evenly
+    // We filter out 0 pitches, then sort them to find CDF (percentiles)
+    const pitches = onsets.map(o => o.pitch || 0).filter(p => p > 0).sort((a,b) => a - b);
+    
+    const getPitchLaneTarget = (pitch: number | undefined): number | undefined => {
+        if (!pitch || pitch <= 0 || pitches.length === 0) return undefined; // No valid pitch
+        
+        // Find percentile using binary search or simple findIndex (since array is relatively small)
+        // For perf, simple binary search for closest
+        let l = 0, r = pitches.length - 1;
+        while (l < r) {
+            const mid = Math.floor((l + r) / 2);
+            if (pitches[mid] < pitch) l = mid + 1;
+            else r = mid;
+        }
+        
+        const percentile = l / pitches.length;
+        
+        // Map percentile [0, 1] to lane [0, laneCount - 1]
+        // E.g. Low pitches on the left, high pitches on the right
+        return Math.floor(percentile * laneCount * 0.99); // 0.99 ensures it doesn't hit laneCount
+    };
 
     let notes: Note[] = [];
     let noteIndex = 0;
     let lastGeneratedTime = -10.0; 
     let isCatchChain = false; 
+    
+    // Rhythm & Structure Analysis Constants
+    const beatDur = 60 / structure.bpm;
+    const measureDur = beatDur * 4;
+    // Try to align to an anchor to detect downbeats
+    const anchor = onsets.length > 0 ? (onsets.find(o => o.isLowFreq && o.energy > 0.8)?.time || onsets[0].time) : 0;
 
     while (noteIndex < onsets.length) {
         const onset = onsets[noteIndex];
@@ -346,10 +400,11 @@ export const generateBeatmap = (
             if (desc.special_pattern === 'burst') notesToAdd = 2; // Chord stream
             
             // Bypass minGap check for bursts
-            const lanes = physics.getBestLanes(notesToAdd, onset.time, 9999, 'stream', 'random');
+            const preferredLane = getPitchLaneTarget(onset.pitch);
+            const lanes = physics.getBestLanes(notesToAdd, onset.time, 9999, 'stream', 'random', false, preferredLane);
             
             lanes.forEach(lane => {
-                notes.push(createNote(onset.time, lane, 0, 'NORMAL'));
+                notes.push(createNote(onset.time, lane, 0, 'NORMAL', onset));
             });
             
             lastGeneratedTime = onset.time;
@@ -357,20 +412,32 @@ export const generateBeatmap = (
             continue;
         }
 
-        // --- Standard Generation ---
+        // --- Standard Generation & Energy Filtering ---
         const baseThreshold = 0.05 + (1.0 - currentSection.intensity) * 0.2;
         const dynThreshold = baseThreshold * config.thresholdMultiplier;
         
-        // STRICTER FILTERING FOR LOW DIFFICULTY
-        // Ensure faint beats are definitely killed at Low Diff (High Multiplier)
-        // Normalized Energy is approx 0.0 - 1.0
-        if (onset.energy < dynThreshold) {
-            noteIndex++;
-            isCatchChain = false; 
-            continue;
+        let isGhostNote = false;
+        
+        // NEW: Sibilant sounds (high ZCR like hi-hats/shakers) feel energetic even if RMS is low.
+        const isSibilant = onset.zcr !== undefined && onset.zcr > 0.35;
+        const effectiveEnergy = isSibilant ? onset.energy * 2.0 : onset.energy;
+
+        if (effectiveEnergy < dynThreshold) {
+            // Instead of fully skipping, let's treat faint notes as "ghost notes". 
+            // We only keep them if they are part of a slide or close to the previous note.
+            const timeSinceLast = onset.time - lastGeneratedTime;
+            const ghostWindow = isSibilant ? 0.5 : 0.3; // Allow shakers to form longer distinct chains
+
+            if (features.catch && timeSinceLast > 0 && timeSinceLast < ghostWindow) {
+                isGhostNote = true; // Demote to CATCH note to maintain flow without adding strain
+            } else {
+                noteIndex++;
+                isCatchChain = false; 
+                continue;
+            }
         }
 
-        if (onset.time - lastGeneratedTime < config.minGap) {
+        if (onset.time - lastGeneratedTime < config.minGap && !isGhostNote && !isSibilant) {
             noteIndex++;
             continue;
         }
@@ -400,7 +467,8 @@ export const generateBeatmap = (
                 
                 if (isExplicitSlide) {
                     const dir = Math.random() > 0.5 ? 1 : -1;
-                    const startL = dir === 1 ? 0 : laneCount - 1;
+                    // Start from the pitch lane, or default to edge
+                    const startL = getPitchLaneTarget(onset.pitch) ?? (dir === 1 ? 0 : laneCount - 1);
                     generatedPattern = PatternLibrary.getStair(onset.time, len, interval, startL, dir, laneCount);
                     patternType = 'CATCH';
                     isCatchChain = true;
@@ -410,7 +478,7 @@ export const generateBeatmap = (
                     const treatAsSlide = numericDiff < 8 && features.catch;
                     
                     const dir = Math.random() > 0.5 ? 1 : -1;
-                    const startL = dir === 1 ? 0 : laneCount - 1;
+                    const startL = getPitchLaneTarget(onset.pitch) ?? (dir === 1 ? 0 : laneCount - 1);
                     generatedPattern = PatternLibrary.getStair(onset.time, len, interval, startL, dir, laneCount);
                     
                     patternType = treatAsSlide ? 'CATCH' : 'NORMAL';
@@ -424,13 +492,13 @@ export const generateBeatmap = (
                         generatedPattern = PatternLibrary.getRoll(onset.time, len, interval, laneCount);
                     } else {
                         const dir = 1;
-                        const startL = 0;
+                        const startL = getPitchLaneTarget(onset.pitch) ?? 0;
                         generatedPattern = PatternLibrary.getStair(onset.time, len, interval, startL, dir, laneCount);
                     }
                     notesConsumed = len;
                 }
                 else if (desc.flow === 'zigzag') {
-                     const l1 = Math.floor(Math.random() * laneCount);
+                     const l1 = getPitchLaneTarget(onset.pitch) ?? Math.floor(Math.random() * laneCount);
                      let l2 = (l1 + 2) % laneCount; 
                      generatedPattern = PatternLibrary.getTrill(onset.time, len, interval, l1, l2);
                      notesConsumed = len;
@@ -439,7 +507,7 @@ export const generateBeatmap = (
                 if (generatedPattern.length > 0) {
                     generatedPattern.forEach(p => {
                         physics.commit([p.lane], p.time); 
-                        notes.push(createNote(p.time, p.lane, 0, patternType));
+                        notes.push(createNote(p.time, p.lane, 0, patternType, onset));
                         lastGeneratedTime = p.time;
                     });
                     noteIndex += notesConsumed; 
@@ -448,12 +516,23 @@ export const generateBeatmap = (
             }
         }
 
+        // --- Rhythm & Structure Analysis ---
+        const offsetFromAnchor = Math.abs(onset.time - anchor);
+        const isDownbeat = (offsetFromAnchor % measureDur < 0.05 || offsetFromAnchor % measureDur > measureDur - 0.05);
+
         // --- Polyphony (Chords) ---
         let simNotes = 1;
-        if (config.maxPolyphony > 1) {
+        if (config.maxPolyphony > 1 && !isGhostNote) {
             const isHeavyHit = onset.energy > 0.9 && onset.isLowFreq;
-            if (isHeavyHit || (desc.focus === 'drum' && onset.energy > 0.8)) simNotes = 2;
-            if (numericDiff >= 18 && onset.energy > 0.95) simNotes = 3;
+            const isCrashCymbal = onset.energy > 0.8 && onset.zcr !== undefined && onset.zcr > 0.25; // Loud & Noisy
+            
+            if (isHeavyHit || (desc.focus === 'drum' && onset.energy > 0.8) || isCrashCymbal) simNotes = 2;
+            if (numericDiff >= 18 && (onset.energy > 0.95 || (isCrashCymbal && isHeavyHit))) simNotes = 3;
+            
+            // HUMAN FEEL: Emphasize downbeats (Start of a measure in 4/4)
+            if (isDownbeat && onset.energy > 0.6) {
+                simNotes = Math.max(simNotes, 2); // Downbeat chord
+            }
         }
         
         if (activeHolds.length > 0 && features.catch) {
@@ -472,10 +551,20 @@ export const generateBeatmap = (
         if (features.catch && activeHolds.length > 0) {
             if (Math.random() < 0.5) isCatchGeneration = true;
         }
+        
+        if (isGhostNote) {
+            isCatchGeneration = true;
+        }
 
         // Generate Single/Chord via Physics
         // Pass style and flow to physics for smarter random/jump handling
-        const lanes = physics.getBestLanes(simNotes, onset.time, config.allowedCost, style, desc.flow, isCatchGeneration);
+        // If it's a catch chain/ghost note, try to use the last lane to create a slide.
+        let preferredLane = getPitchLaneTarget(onset.pitch);
+        if (isCatchChain || isGhostNote) {
+            if (notes.length > 0) preferredLane = notes[notes.length - 1].lane;
+        }
+        
+        const lanes = physics.getBestLanes(simNotes, onset.time, config.allowedCost, style, desc.flow, isCatchGeneration, preferredLane);
 
         let nextNoteTime = 9999;
         if (noteIndex + 1 < onsets.length) nextNoteTime = onsets[noteIndex+1].time;
@@ -490,29 +579,124 @@ export const generateBeatmap = (
             const isLaneHolding = activeHolds.some(h => h.lane === lane);
 
             // --- HOLD LOGIC REFACTOR ---
-            // Removed global 'activeHolds.length === 0' constraint.
-            // Removed 'lanes.length === 1' constraint.
-            if (features.holds && !isLaneHolding) {
-                const maxDur = nextNoteTime - onset.time - 0.1;
+            if (features.holds && !isLaneHolding && !isGhostNote) {
+                // Scan forward to see when the next SIMILAR energy/pitch note is
+                // This prevents hi-hats from cutting off vocal/melody holds!
+                let nextSimilarNoteTime = onset.time + beatDur * 4; // cap at 4 beats
+                let densityCount = 0; // count notes in the immediate future
                 
-                // Allow holds even for chords, but maybe limit density
-                // If there are already 2+ holds active, reduce chance unless high diff
+                for(let j = noteIndex + 1; j < onsets.length; j++) {
+                    const future = onsets[j];
+                    if (future.time - onset.time > beatDur * 4) break;
+                    
+                    if (future.time - onset.time < beatDur * 1.5) {
+                        densityCount++;
+                    }
+                    
+                    // A major melody shift or a strong hit on the same freq range ends the hold
+                    if (!future.isLowFreq && future.energy > 0.4) {
+                        // If it's very close in time, it's a drum fill, so cut
+                        if (future.time - onset.time < beatDur * 0.5) {
+                            nextSimilarNoteTime = Math.min(nextSimilarNoteTime, future.time);
+                            // Do not break immediately, we still want to count density
+                        }
+                        // Or if it's a prominent note
+                        else if (future.energy > 0.7) {
+                           nextSimilarNoteTime = Math.min(nextSimilarNoteTime, future.time);
+                        }
+                    }
+                }
+                
+                let maxDur = nextSimilarNoteTime - onset.time;
+                
+                // If there are many rapid notes coming up, we shouldn't place a long hold here
+                // because the player should be tapping that dense pattern!
+                if (densityCount > 3 && maxDur > beatDur * 0.5) {
+                    maxDur = beatDur * 0.5; // Severely limit hold
+                }
+                
+                // For lower difficulties, prevent polyphony overlaps completely
+                if (numericDiff <= 6) {
+                     maxDur = Math.min(maxDur, nextNoteTime - onset.time);
+                }
+                
                 const tooManyHolds = activeHolds.length >= 2 && numericDiff < 15;
 
-                // Relaxed duration constraint: allow shorter holds (0.25 beat)
+                // Hold must at least span a 1/4 beat to look good
                 if (maxDur > beatDur * 0.25 && !tooManyHolds) {
-                    let holdChance = 0.2; // Base chance increased
+                    let holdChance = 0.0; 
                     
-                    // Strongly respect AI 'hold' style
+                    // HUMAN MAPPER LOGIC:
+                    
+                    // NEW: Hardware-based duration from DSP!
+                    if (onset.duration !== undefined) {
+                        if (onset.duration > beatDur * 0.5) holdChance += 1.0;
+                        if (onset.duration > beatDur * 1.0) holdChance += 0.5;
+                        // Limit maxDur based on actual sound sustain
+                        maxDur = Math.min(maxDur, onset.duration + 0.1); 
+                    }
+                    
+                    // 1. Long Gap = Sustained Sound (Vocals/Synths)
+                    if (maxDur >= beatDur * 1.0) {
+                        holdChance += Math.min(0.5, maxDur / (beatDur * 2));
+                    }
+                    
+                    // 2. High Energy, Non-Kick hits that ring out (Crashes, shouts)
+                    if (onset.energy > 0.8 && !onset.isLowFreq) {
+                        holdChance += 0.4;
+                    }
+                    
+                    // 3. Downbeats with space are extremely good hold positions
+                    if (isDownbeat && maxDur > beatDur * 0.5) {
+                        holdChance += 0.4;
+                    }
+                    
+                    // 4. Thematic matching
                     if (style === 'hold') holdChance += 0.8; 
-                    if (style === 'simple') holdChance += 0.2;
                     if (desc.focus === 'vocal' || desc.focus === 'melody') holdChance += 0.3;
-                    if (numericDiff < 8) holdChance += 0.1; 
+                    if (numericDiff < 8) holdChance += 0.2; // Density scaling
+                    
+                    // 5. Short rapid notes should NOT be holds
+                    if (maxDur < beatDur * 0.5 && style !== 'hold') holdChance -= 0.6;
+                    
+                    // Faint background notes should not be massive holds
+                    if (onset.energy < 0.3) holdChance -= 0.8;
+                    
+                    // NEW: Use ZCR (Zero-Crossing Rate) to differentiate noisy vs tonal
+                    if (onset.zcr !== undefined) {
+                        if (onset.zcr > 0.35) { // Very noisy (snare, crash, shaker)
+                            holdChance -= 2.0; // Hard kill on holds
+                        } else if (onset.zcr < 0.1 && onset.duration !== undefined && onset.duration > beatDur * 0.5) { 
+                            // Very tonal/harmonic and sustained (vocals, pure synth)
+                            holdChance += 0.5;
+                        }
+                    }
+                    
+                    // 6. Kicks are rarely holds (unless forced by style)
+                    if (onset.isLowFreq && onset.energy > 0.6) {
+                         holdChance -= 1.0;
+                         if (style !== 'hold') holdChance = -2.0; // Hard kill 
+                    }
 
-                    if (Math.random() < holdChance) {
-                        // Hold duration: randomly between min and max, biased towards beat intervals
-                        const targetDur = Math.min(maxDur, beatDur * 4.0); // Cap at 4 beats
-                        duration = targetDur;
+                    if (holdChance > 0 && Math.random() < holdChance) {
+                        // Snap duration to grid to ensure it ends cleanly on a musical fraction
+                        let targetDur = Math.min(maxDur, beatDur * 4.0);
+                        
+                        // Prevent holds from mindlessly stretching across long silent sections
+                        // Cap at 2 beats for non-hold styles, or 1 measure for vocal/hold styles
+                        const absoluteMax = (style === 'hold' || desc.focus === 'vocal') ? beatDur * 4.0 : beatDur * 1.5;
+                        if (targetDur > absoluteMax) {
+                            targetDur = absoluteMax;
+                        }
+                        
+                        // We step back by 1/8th of a beat to leave a gap before the next note
+                        const releaseGap = beatDur / 8;
+                        targetDur = targetDur - releaseGap;
+                        
+                        // Only create if it's long enough to be distinct from a tap
+                        if (targetDur >= beatDur * 0.25) {
+                            duration = targetDur;
+                        }
                     }
                 }
             }
@@ -520,6 +704,7 @@ export const generateBeatmap = (
             // --- Catch Logic (Overlap Allowed) ---
             if (features.catch && duration === 0) {
                 let catchChance = 0.05; 
+                if (isGhostNote) catchChance = 1.0; // Force ghost notes to be CATCH
                 
                 if (isLaneHolding) {
                     catchChance = 1.0; 
@@ -528,14 +713,17 @@ export const generateBeatmap = (
                 }
 
                 // Explicit Flow Logic for Meaningful Catch Notes
-                if (desc.flow === 'slide') catchChance = 0.9;
-                else if (isCatchChain) catchChance += 0.6; // Continue chain
-                else catchChance = 0; // DISABLE random catch notes if not in a chain or flow
+                if (!isGhostNote) {
+                    if (desc.flow === 'slide') catchChance = 0.9;
+                    else if (isCatchChain) catchChance += 0.6; // Continue chain
+                    else if (desc.flow === 'random' && currentSection.intensity > 0.6) catchChance = 0.15; // Organic spawn
+                    else catchChance = 0; // DISABLE random catch notes if not in a chain or flow
 
-                if (desc.flow === 'circular' && style === 'stream') catchChance += 0.3;
-                if (desc.flow === 'linear' || desc.flow === 'zigzag') catchChance = 0; 
+                    if (desc.flow === 'circular' && style === 'stream') catchChance += 0.3;
+                    if (desc.flow === 'linear' || desc.flow === 'zigzag') catchChance = 0; 
+                }
 
-                if (Math.random() < catchChance) {
+                if (Math.random() < catchChance || isGhostNote) {
                     type = 'CATCH';
                     isCatchChain = true;
                 } else {
@@ -543,7 +731,7 @@ export const generateBeatmap = (
                 }
             }
 
-            notes.push(createNote(onset.time, lane, duration, type));
+            notes.push(createNote(onset.time, lane, duration, type, onset));
         });
 
         lastGeneratedTime = onset.time;
@@ -553,7 +741,7 @@ export const generateBeatmap = (
     return notes;
 };
 
-const createNote = (time: number, lane: number, duration: number, type: NoteType): Note => ({
+const createNote = (time: number, lane: number, duration: number, type: NoteType, feature?: Partial<Onset>): Note => ({
     id: `note-${time.toFixed(3)}-${lane}`,
     time,
     lane: lane as NoteLane,
@@ -561,7 +749,10 @@ const createNote = (time: number, lane: number, duration: number, type: NoteType
     visible: true,
     duration,
     isHolding: false,
-    type
+    type,
+    pitch: feature?.pitch,
+    zcr: feature?.zcr,
+    energy: feature?.energy
 });
 // ... calculateDifficultyRating remains unchanged ...
 export const calculateDifficultyRating = (notes: Note[], duration: number): number => {

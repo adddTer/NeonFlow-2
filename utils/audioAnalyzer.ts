@@ -11,7 +11,7 @@ const calculateRMS = (data: Float32Array) => {
 };
 
 // 移动平均滤波器 - Pure Math
-const calculateMovingAverage = (data: number[], windowSize: number) => {
+const calculateMovingAverage = (data: ArrayLike<number>, windowSize: number) => {
   const averages = new Float32Array(data.length);
   const halfWindow = Math.floor(windowSize / 2);
   
@@ -105,20 +105,19 @@ export const computeOnsets = (
     const totalFrames = Math.floor(lowChannelData.length / samplesPerFrame);
 
     // 能量谱计算
-    const lowEnergies: number[] = [];
-    const fullEnergies: number[] = [];
+    const lowEnergies = new Float32Array(totalFrames);
+    const fullEnergies = new Float32Array(totalFrames);
 
     for (let i = 0; i < totalFrames; i++) {
         const start = i * samplesPerFrame;
         const end = start + samplesPerFrame;
-        // 简单的切片可能会导致大量的 GC，但在 Worker 中通常可以接受
-        // 优化：直接在循环中计算 RMS 避免 slice，但这需要重写 calculateRMS 支持 offset
-        lowEnergies.push(calculateRMS(lowChannelData.slice(start, end)));
-        fullEnergies.push(calculateRMS(fullChannelData.slice(start, end)));
+        // 优化：使用 subarray 避免内存分配
+        lowEnergies[i] = calculateRMS(lowChannelData.subarray(start, end));
+        fullEnergies[i] = calculateRMS(fullChannelData.subarray(start, end));
     }
 
     // 局部动态阈值 (0.5秒窗口，用于捕捉瞬态)
-    const localWindow = 0.5 * frameRate; 
+    const localWindow = Math.floor(0.5 * frameRate); 
     const lowThresholds = calculateMovingAverage(lowEnergies, localWindow);
     const fullThresholds = calculateMovingAverage(fullEnergies, localWindow);
 
@@ -145,10 +144,38 @@ export const computeOnsets = (
         if (isLowHit || isFullHit) {
             const energy = Math.min(1, Math.max(absLow, absFull) * 5);
             
+            // Calculate pitch and timbre only at onset to save performance
+            const start = i * samplesPerFrame;
+            // Use a slightly larger window for pitch detection to ensure we catch low frequencies
+            // max 2048 samples or to end of data
+            let endForPitch = start + Math.max(samplesPerFrame, 2048);
+            if (endForPitch > fullChannelData.length) endForPitch = fullChannelData.length;
+            
+            const frameData = fullChannelData.subarray(start, endForPitch);
+            const pitch = detectPitch(frameData, sampleRate);
+            const zcr = calculateZCR(frameData);
+
+            // Compute sustained duration
+            let sustainFrames = 0;
+            // threshold for sustain drop (e.g. 25% of peak energy)
+            const dropThreshold = Math.max(silenceThreshold, absFull * 0.25);
+            for(let j = i + 1; j < Math.min(i + frameRate * 2, totalFrames); j++) {
+                if (fullEnergies[j] < dropThreshold) break;
+                // If there's a new onset (energy goes back up significantly), stop sustain.
+                if (fullEnergies[j] > fullEnergies[j-1] * 1.5 && fullEnergies[j] > silenceThreshold) {
+                    break;
+                }
+                sustainFrames++;
+            }
+            const duration = sustainFrames / frameRate;
+
             onsets.push({
                 time,
                 energy,
-                isLowFreq: isLowHit && (lowRatio > fullRatio)
+                isLowFreq: isLowHit && (lowRatio > fullRatio),
+                pitch,
+                zcr,
+                duration
             });
             lastOnsetTime = time;
         }
@@ -219,4 +246,120 @@ export const analyzeAudioDSP = async (
   const onsets = computeOnsets(lowData, fullData, audioBuffer.sampleRate);
   const estimatedBPM = estimateBPM(onsets);
   return { buffer: audioBuffer, onsets, duration: audioBuffer.duration, estimatedBPM };
+};
+
+export interface AudioFeature {
+  time: number;
+  rms: number; // Volume
+  zcr: number; // Timbre/Brightness
+  pitch: number; // Fundamental Frequency (Hz)
+}
+
+// Simple Auto-correlation Pitch Detection (Optimized with Downsampling)
+export function detectPitch(buffer: Float32Array, sampleRate: number): number {
+    // 1. Calculate RMS to skip silence early
+    // We can use the full buffer for accurate volume checking
+    let rms = 0;
+    const bufLen = buffer.length;
+    for (let i = 0; i < bufLen; i++) rms += buffer[i] * buffer[i];
+    rms = Math.sqrt(rms / bufLen);
+    if (rms < 0.01) return 0; // Too quiet
+
+    // 2. Downsample for performance (by a factor of DOWNSAMPLE, e.g., 4)
+    // 44100Hz -> 11025Hz, greatly reduces O(N^2) autocorrelation overhead
+    const DOWNSAMPLE = 4;
+    const dsLength = Math.floor(bufLen / DOWNSAMPLE);
+    
+    // Window size for 20Hz at 11025Hz is ~551 samples. Array length of 1024 is plenty.
+    const MAX_DS_LENGTH = 1024; 
+    const finalLength = Math.min(dsLength, MAX_DS_LENGTH);
+    
+    const dsBuffer = new Float32Array(finalLength);
+    for (let i = 0; i < finalLength; i++) {
+        dsBuffer[i] = buffer[i * DOWNSAMPLE];
+    }
+    const dsSampleRate = sampleRate / DOWNSAMPLE;
+
+    // 3. Autocorrelation on Downsampled Buffer
+    // Constrain search between 20Hz (sub-bass) and 2000Hz (high notes)
+    const minLag = Math.floor(dsSampleRate / 2000); 
+    const maxLag = Math.min(finalLength, Math.floor(dsSampleRate / 20)); 
+
+    const c = new Float32Array(maxLag);
+    for (let lag = minLag; lag < maxLag; lag++) {
+        let sum = 0;
+        for (let j = 0; j < finalLength - lag; j++) {
+            sum += dsBuffer[j] * dsBuffer[j + lag];
+        }
+        c[lag] = sum;
+    }
+
+    // 4. Find the peak
+    // Skip early downward slope to avoid zero-lag peak
+    let d = minLag;
+    while (d < maxLag - 1 && c[d] > c[d + 1]) d++;
+
+    let maxval = -1, maxpos = -1;
+    for (let i = d; i < maxLag; i++) {
+        if (c[i] > maxval) {
+            maxval = c[i];
+            maxpos = i;
+        }
+    }
+    
+    let T0 = maxpos;
+    if (T0 <= 0) return 0;
+
+    // 5. Parabolic interpolation for finer precision
+    let x1 = c[T0 - 1] || 0, x2 = c[T0], x3 = c[T0 + 1] || 0;
+    let a = (x1 + x3 - 2 * x2) / 2;
+    let b = (x3 - x1) / 2;
+    if (a) T0 = T0 - b / (2 * a);
+
+    // Compute actual pitch
+    const pitch = dsSampleRate / T0;
+    if (pitch < 20 || pitch > 4000) return 0; 
+    
+    return pitch;
+}
+
+// Zero Crossing Rate
+export function calculateZCR(buffer: Float32Array): number {
+    let crossings = 0;
+    for (let i = 1; i < buffer.length; i++) {
+        if ((buffer[i] >= 0 && buffer[i - 1] < 0) || (buffer[i] < 0 && buffer[i - 1] >= 0)) {
+            crossings++;
+        }
+    }
+    return crossings / buffer.length;
+}
+
+export const extractAudioFeaturesFromData = (channelData: Float32Array, sampleRate: number, framesPerSecond: number = 10): AudioFeature[] => {
+    const samplesPerFrame = Math.floor(sampleRate / framesPerSecond);
+    const totalFrames = Math.floor(channelData.length / samplesPerFrame);
+    
+    const features: AudioFeature[] = [];
+
+    for (let i = 0; i < totalFrames; i++) {
+        const start = i * samplesPerFrame;
+        const end = start + samplesPerFrame;
+        const frameData = channelData.subarray(start, end);
+        
+        const rms = calculateRMS(frameData);
+        const zcr = calculateZCR(frameData);
+        const pitch = detectPitch(frameData, sampleRate);
+        
+        features.push({
+            time: i / framesPerSecond,
+            rms,
+            zcr,
+            pitch
+        });
+    }
+
+    return features;
+};
+
+export const extractAudioFeatures = (audioBuffer: AudioBuffer, framesPerSecond: number = 10): AudioFeature[] => {
+    return extractAudioFeaturesFromData(audioBuffer.getChannelData(0), audioBuffer.sampleRate, framesPerSecond);
 };
