@@ -127,22 +127,33 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       const sorted = [...structure.sections].sort((a,b) => a.startTime - b.startTime);
       let currentDist = 0;
       const points: { time: number, dist: number, sv: number }[] = [];
+      points.push({ time: -99999, dist: -99999, sv: 1.0 });
       points.push({ time: 0, dist: 0, sv: 1.0 });
   
       let lastTime = 0;
       for (const sec of sorted) {
+          if (sec.endTime <= lastTime) continue; // Skip if fully contained in previous
+          
           if (sec.startTime > lastTime) {
-             currentDist += (sec.startTime - lastTime) * 1.0;
-             points.push({ time: sec.startTime, dist: currentDist, sv: 1.0 });
+             currentDist += (sec.startTime - lastTime) * points[points.length - 1].sv;
+             
+             let sv = 1.0;
+             if (sec.intensity < 0.4) sv = 0.5;
+             else if (sec.intensity < 0.6) sv = 0.8;
+             else if (sec.intensity > 0.8) sv = 1.3;
+             
+             points.push({ time: sec.startTime, dist: currentDist, sv });
+          } else {
+             let sv = 1.0;
+             if (sec.intensity < 0.4) sv = 0.5;
+             else if (sec.intensity < 0.6) sv = 0.8;
+             else if (sec.intensity > 0.8) sv = 1.3;
+             points[points.length - 1].sv = Math.max(points[points.length - 1].sv, sv);
           }
           
-          let sv = 1.0;
-          if (sec.intensity < 0.4) sv = 0.5; // Slow down significantly during slow parts
-          else if (sec.intensity < 0.6) sv = 0.8;
-          else if (sec.intensity > 0.8) sv = 1.3; // Speed up during drops
-          
-          currentDist += (sec.endTime - sec.startTime) * sv;
-          points.push({ time: sec.endTime, dist: currentDist, sv });
+          let sv = points[points.length - 1].sv;
+          currentDist += (sec.endTime - Math.max(lastTime, sec.startTime)) * sv;
+          points.push({ time: sec.endTime, dist: currentDist, sv: 1.0 });
           lastTime = sec.endTime;
       }
       
@@ -180,13 +191,43 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
           }
           p1 = timeToDistMap[i];
       }
-      return t;
+      return p1.dist + (t - p1.time) * p1.sv;
   };
 
   const getVisualGap = (noteT: number, gameT: number, noteId: string) => {
-      // Temporarily disable SV and drop-in effects due to flickering bugs.
-      // Logic remains in beatmapGenerator.ts but is ignored during render.
-      return noteT - gameT;
+      let gap = getMappedTime(noteT) - getMappedTime(gameT);
+      if (specialModifiers.has(noteId) && gap > 0) {
+          const T = noteT - gameT; // Real time difference
+          if (T > 0) {
+              const T_fall = 0.6;
+              const T_rise_end = 1.0;
+              const T_rise_start = 1.4;
+              
+              if (T <= T_fall) {
+                  // Fall normally (returns mapped gap)
+                  return gap;
+              } else {
+                  // The static hover mapped distance
+                  const fixedHoverGap = getMappedTime(noteT) - getMappedTime(noteT - T_fall);
+                  
+                  if (T <= T_rise_end) {
+                      // Hover phase - apply gentle floating that tapers to 0 as it approaches T_fall
+                      const floatFactor = Math.min(1, (T - T_fall) / 0.1);
+                      const float = Math.sin(T * 12) * 0.05 * floatFactor;
+                      return fixedHoverGap + float;
+                  } else if (T <= T_rise_start) {
+                      // Rise phase - rise from 0 to fixedHoverGap
+                      const progress = (T_rise_start - T) / (T_rise_start - T_rise_end);
+                      // Use easeOutCubic for smooth rise
+                      const ease = 1 - Math.pow(1 - progress, 3);
+                      return fixedHoverGap * ease;
+                  } else {
+                      return 9999;
+                  }
+              }
+          }
+      }
+      return gap;
   };
 
   // Memoize safe theme to prevent flickering colors
@@ -265,7 +306,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       const gainedAccScore = accScorePerNote * hitValue;
       const comboScorePerNote = (MAX_SCORE * COMBO_WEIGHT) / totalNotes;
 
-      const newScore = scoreRef.current.score + gainedAccScore + comboScorePerNote;
+      let scoreToAdd = gainedAccScore + comboScorePerNote;
+      if (hitNote.duration > 0) {
+          hitNote.holdScoreTarget = scoreToAdd * 0.8;
+          hitNote.holdScoreGained = 0;
+          scoreToAdd = scoreToAdd * 0.2;
+      }
+
+      const newScore = scoreRef.current.score + scoreToAdd;
       scoreRef.current.score = Math.min(MAX_SCORE, newScore);
 
       scoreRef.current.hitHistory.push(diff);
@@ -313,6 +361,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
               onScoreUpdate({...scoreRef.current});
           } else {
               // Released at end (Successful completion logic handled in gameLoop mostly, but we can finalize here)
+              if (holdingNote.holdScoreTarget && holdingNote.holdScoreTarget > 0) {
+                  const remaining = holdingNote.holdScoreTarget - (holdingNote.holdScoreGained || 0);
+                  if (remaining > 0) {
+                      scoreRef.current.score = Math.min(MAX_SCORE, scoreRef.current.score + remaining);
+                      holdingNote.holdScoreGained = holdingNote.holdScoreTarget;
+                  }
+              }
               holdingNote.isHolding = false;
           }
       }
@@ -498,7 +553,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       playHitSound(type);
       laneHitStateRef.current[lane] = 1.0; 
       comboScaleRef.current = 1.4;
-      hitFlashScaleRef.current = Math.min(1.0, hitFlashScaleRef.current + (isPerfect ? 0.4 : 0.2));
+      hitFlashScaleRef.current = Math.min(0.6, hitFlashScaleRef.current + (isPerfect ? 0.2 : 0.1));
       const { height } = sizeRef.current;
       const laneX = (startXRef.current + lane * laneWidthRef.current + laneWidthRef.current / 2);
       const hitY = height * (isMobileRef.current ? 0.85 : 0.80);
@@ -611,27 +666,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         beatPulse = Math.pow(1 - (gameTime % beatDur) / beatDur, 2); 
     }
 
-    // --- Performance Animation: Camera Shake & Bob ---
-    if (!isFrozen) {
-        if (isDrop) {
-            // Rhythmic downbeat bounce
-            const bounce = beatPulse * (isMobileRef.current ? 5 : 10) * visualIntensity;
-            ctx.translate(0, bounce);
-        } else if (isBuild) {
-            // Tense shivering effect
-            const phase = (gameTime * 40) % (Math.PI * 2);
-            const shake = Math.sin(phase) * (isMobileRef.current ? 1 : 2) * visualIntensity;
-            ctx.translate(shake, 0);
-        }
-        
-        // Add Impact Shake from Chord Hits
-        if (hitFlashScaleRef.current > 0.1) {
-             const impactShakeX = (Math.random() - 0.5) * hitFlashScaleRef.current * 10;
-             const impactShakeY = (Math.random() - 0.5) * hitFlashScaleRef.current * 10;
-             ctx.translate(impactShakeX, impactShakeY);
-        }
-    }
-
     const bgGrad = ctx.createLinearGradient(0, 0, 0, height);
     bgGrad.addColorStop(0, '#13131f'); bgGrad.addColorStop(1, '#050508');
     ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, width, height);
@@ -646,8 +680,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     const kiaiStrength = Math.max(0, (visualIntensity - 0.6) / 0.6); 
     const kiaiBoost = kiaiStrength * (beatPulse * 0.2);
     // Add hit flash to global ambient lighting
-    const flashBoost = hitFlashScaleRef.current * 0.3;
-    const finalOpacity = Math.min(0.8, baseOpacity + kiaiBoost + flashBoost);
+    const flashBoost = hitFlashScaleRef.current * 0.15;
+    const finalOpacity = Math.min(0.5, baseOpacity + kiaiBoost + flashBoost);
 
     if (!isFrozen && hitFlashScaleRef.current > 0) {
         hitFlashScaleRef.current -= 0.05;
@@ -790,8 +824,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             if (scoreRef.current.combo > scoreRef.current.maxCombo) scoreRef.current.maxCombo = scoreRef.current.combo;
             
             const totalNotes = notesRef.current.length || 1;
-            const scorePerPerfect = ((MAX_SCORE * ACC_WEIGHT) / totalNotes) * 1.0 + ((MAX_SCORE * COMBO_WEIGHT) / totalNotes);
-            scoreRef.current.score = Math.min(MAX_SCORE, scoreRef.current.score + scorePerPerfect);
+            let scoreToAdd = ((MAX_SCORE * ACC_WEIGHT) / totalNotes) * 1.0 + ((MAX_SCORE * COMBO_WEIGHT) / totalNotes);
+            if (note.duration > 0) {
+                note.holdScoreTarget = scoreToAdd * 0.8;
+                note.holdScoreGained = 0;
+                scoreToAdd = scoreToAdd * 0.2;
+            }
+            scoreRef.current.score = Math.min(MAX_SCORE, scoreRef.current.score + scoreToAdd);
 
             // Record a perfect 0ms offset hit for histogram consistency
             scoreRef.current.hitHistory.push(0);
@@ -843,14 +882,25 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                         particlesRef.current.push(p);
                     }
                     
-                    // --- Tick Scoring ---
-                    // Add small score every frame to reward holding
-                    // Total available bonus for holds is relatively small compared to hit
-                    const tickScore = 50; // Arbitrary small number
-                    scoreRef.current.score = Math.min(MAX_SCORE, scoreRef.current.score + tickScore);
+                    if (note.holdScoreTarget && note.holdScoreTarget > 0) {
+                        const progress = Math.max(0, Math.min(1, (gameTime - note.time) / note.duration));
+                        const expectedGain = note.holdScoreTarget * progress;
+                        const toAdd = expectedGain - (note.holdScoreGained || 0);
+                        if (toAdd > 0) {
+                            scoreRef.current.score = Math.min(MAX_SCORE, scoreRef.current.score + toAdd);
+                            note.holdScoreGained = expectedGain;
+                        }
+                    }
 
                 } else { 
                     // Hold Complete
+                    if (note.holdScoreTarget && note.holdScoreTarget > 0) {
+                        const remaining = note.holdScoreTarget - (note.holdScoreGained || 0);
+                        if (remaining > 0) {
+                            scoreRef.current.score = Math.min(MAX_SCORE, scoreRef.current.score + remaining);
+                            note.holdScoreGained = note.holdScoreTarget;
+                        }
+                    }
                     note.visible = false; 
                     note.isHolding = false; 
                     triggerHitVisuals(note.lane, 'PERFECT'); // Visual flourish on release

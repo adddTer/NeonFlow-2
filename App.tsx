@@ -511,7 +511,7 @@ function App() {
              
              {/* Ready Screen Header */}
              <div className="relative z-50 flex justify-between items-center p-6 w-full shrink-0">
-                <button onClick={() => setStatus(GameStatus.Details)} className="group flex items-center justify-center w-12 h-12 rounded-full bg-white/5 border border-white/5 backdrop-blur-md hover:bg-white/10 active:scale-95 transition-all"><ArrowLeft className="w-6 h-6 text-white group-hover:-translate-x-1 transition-transform" /></button>
+                <div className="w-12"></div> {/* Spacer to keep center aligned */}
                 <div className="px-3 py-1 rounded-full bg-white/5 border border-white/5 backdrop-blur-md text-[10px] font-bold uppercase tracking-[0.2em] text-gray-500">任务简报</div>
                 <div className="w-12"></div>
              </div>

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Music, X, Check, Bug, BrainCircuit, Mic2, AlertTriangle, RefreshCw, Layers, Zap } from 'lucide-react';
+import { Music, X, Check, BrainCircuit, Mic2, AlertTriangle, Layers, Zap, SlidersHorizontal, ChevronRight } from 'lucide-react';
 import { BeatmapDifficulty, LaneCount, PlayStyle } from '../../types';
 
 interface SongConfigModalProps {
@@ -11,7 +11,7 @@ interface SongConfigModalProps {
     setLaneCount: (c: LaneCount) => void;
     playStyle: PlayStyle;
     setPlayStyle: (s: PlayStyle) => void;
-    difficulty: number | null; // Changed from BeatmapDifficulty to number (1-20)
+    difficulty: number | null; 
     setDifficulty: (d: number) => void;
     features: { normal: boolean; holds: boolean; catch: boolean };
     setFeatures: (f: any) => void;
@@ -31,10 +31,10 @@ interface SongConfigModalProps {
 }
 
 const STYLE_PRESETS = [
-    { id: 'Balanced', label: '综合均衡', desc: '节奏与旋律并重', color: 'bg-blue-500' },
-    { id: 'Stream', label: '体力流', desc: '高密度连点', color: 'bg-red-500' },
-    { id: 'Tech', label: '技巧流', desc: '复杂切分与交互', color: 'bg-purple-500' },
-    { id: 'Flow', label: '流畅感', desc: '顺滑的键位移动', color: 'bg-green-500' },
+    { id: 'Balanced', label: '综合均衡', desc: '节奏与旋律并重', color: 'from-blue-500/20' },
+    { id: 'Stream', label: '体力流', desc: '高密度连点', color: 'from-red-500/20' },
+    { id: 'Tech', label: '技巧流', desc: '复杂切分与交互', color: 'from-purple-500/20' },
+    { id: 'Flow', label: '流畅感', desc: '顺滑的键位移动', color: 'from-green-500/20' },
 ];
 
 export const SongConfigModal: React.FC<SongConfigModalProps> = ({
@@ -81,18 +81,18 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
         const isRetryError = errorState.type === 'AI_RETRY_EXHAUSTED';
         
         return (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-fade-in font-sans">
-                <div className="bg-[#0f172a] border border-red-500/30 rounded-3xl p-8 w-full max-w-md shadow-2xl relative flex flex-col items-center text-center">
-                    <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mb-6 animate-pulse">
-                        <AlertTriangle className="w-10 h-10 text-red-500" />
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 md:p-8 animate-fade-in font-sans">
+                <div className="absolute inset-0 bg-black/90 backdrop-blur-3xl" onClick={() => {}}></div>
+                <div className="bg-[#0a0a0c] border border-red-500/30 rounded-3xl p-8 w-full max-w-lg shadow-[0_0_80px_rgba(239,68,68,0.3)] relative flex flex-col items-center text-center z-10">
+                    <div className="w-24 h-24 bg-red-500/10 rounded-full flex items-center justify-center mb-6 animate-pulse border border-red-500/20">
+                        <AlertTriangle className="w-12 h-12 text-red-500 drop-shadow-[0_0_10px_#ef4444]" />
                     </div>
-                    <h2 className="text-2xl font-black text-white mb-2">生成中断</h2>
-                    <p className="text-gray-400 text-sm mb-6 leading-relaxed whitespace-pre-line">
-                        {errorState.message || "未知错误发生。"}
+                    <h2 className="text-3xl font-black text-red-400 mb-2 tracking-widest uppercase">发生错误</h2>
+                    <p className="text-gray-400 text-sm mb-8 leading-relaxed whitespace-pre-line tracking-wide">
+                        {errorState.message || "未知错误。请检查系统日志。"}
                     </p>
                     
-                    <div className="w-full space-y-3">
-                        {/* Special Action for Retry Exhausted */}
+                    <div className="w-full space-y-4">
                         {isRetryError && setUseProModel && (
                             <button 
                                 onClick={() => { 
@@ -100,34 +100,25 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                                     setUseProModel(true); 
                                     handleConfirm(); 
                                 }}
-                                className="w-full py-4 bg-gradient-to-r from-neon-purple to-indigo-600 text-white font-black rounded-xl hover:shadow-[0_0_20px_rgba(139,92,246,0.5)] transition-all flex items-center justify-center gap-2 group mb-2"
+                                className="w-full py-4 bg-gradient-to-r from-neon-purple to-indigo-600 text-white font-black rounded-2xl hover:shadow-[0_0_30px_rgba(139,92,246,0.6)] transition-all flex items-center justify-center gap-3 group border border-white/20 uppercase tracking-widest text-sm"
                             >
-                                <Zap className="w-4 h-4 fill-current group-hover:scale-110 transition-transform"/>
-                                升级至 Gemini 3 Pro 重试
+                                <Zap className="w-5 h-5 fill-current group-hover:scale-125 transition-transform text-yellow-300"/>
+                                切换大模型兜底并重试
                             </button>
                         )}
 
                         <button 
                             onClick={() => { resetError && resetError(); handleConfirm(); }}
-                            className="w-full py-3 bg-white text-black font-bold rounded-xl hover:bg-gray-200 transition-colors"
+                            className="w-full py-4 bg-white/10 text-white font-black uppercase tracking-widest rounded-2xl hover:bg-white hover:text-black transition-all border border-white/20 text-sm"
                         >
-                            {isRetryError ? "保持当前模型重试" : "重试"}
+                            {isRetryError ? "直接重试" : "重试操作"}
                         </button>
-                        
-                        {isDebugMode && (
-                            <button 
-                                onClick={() => { resetError && resetError(); setSkipAI(true); handleConfirm(); }}
-                                className="w-full py-3 bg-white/5 text-white font-bold rounded-xl hover:bg-white/10 transition-colors border border-white/10"
-                            >
-                                尝试纯算法模式 (DSP Only)
-                            </button>
-                        )}
                         
                         <button 
                             onClick={onCancel}
-                            className="w-full py-3 text-gray-500 font-bold hover:text-white transition-colors text-sm"
+                            className="w-full py-3 text-gray-500 font-bold hover:text-red-400 transition-colors text-xs tracking-widest uppercase mt-4"
                         >
-                            取消
+                            取消操作
                         </button>
                     </div>
                 </div>
@@ -144,110 +135,125 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
     };
 
     const getDiffLabel = (val: number) => {
-        if (val <= 5) return "入门";
-        if (val <= 10) return "进阶";
-        if (val <= 15) return "专家";
-        return "大师";
+        if (val <= 5) return "NOVICE";
+        if (val <= 10) return "ADVANCED";
+        if (val <= 15) return "EXPERT";
+        return "MASTER";
     };
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in font-sans">
-             <div className="bg-[#0f172a] border border-white/20 rounded-3xl w-full max-w-5xl shadow-2xl relative flex flex-col max-h-[95vh] overflow-hidden">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 md:p-8 animate-fade-in font-sans">
+             <div className="absolute inset-0 bg-black/80 backdrop-blur-3xl" onClick={onCancel}></div>
+             
+             <div className="bg-[#0a0a0c] border border-white/10 rounded-3xl w-full max-w-5xl shadow-[0_0_100px_rgba(0,0,0,1)] relative flex flex-col max-h-[95vh] overflow-hidden z-10">
                  
+                 {/* Decorative background glow */}
+                 <div className="absolute top-0 right-0 w-96 h-96 bg-neon-blue/10 blur-[120px] rounded-full pointer-events-none"></div>
+
                  {/* Header */}
-                 <div className="p-6 border-b border-white/10 flex justify-between items-center bg-[#0a0a0a]">
-                     <div className="flex items-center gap-4">
-                         <div className="p-3 bg-neon-blue/10 rounded-xl">
-                             <Music className="w-6 h-6 text-neon-blue" />
+                 <div className="p-6 md:p-8 border-b border-white/5 flex justify-between items-start relative z-10">
+                     <div className="flex items-center gap-5">
+                         <div className="p-4 bg-white/5 border border-white/10 rounded-2xl shadow-inner relative overflow-hidden group">
+                             <div className="absolute inset-0 bg-neon-blue/20 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                             <Music className="w-8 h-8 text-white relative z-10" />
                          </div>
                          <div>
-                             <h1 className="text-xl font-black text-white tracking-tight uppercase">配置工程</h1>
-                             <div className="text-xs text-gray-500 font-mono mt-0.5 max-w-[200px] truncate">{file.name}</div>
+                             <h1 className="text-2xl font-black text-white tracking-widest uppercase mb-1">项目配置</h1>
+                             <div className="flex items-center gap-2 text-xs font-mono text-gray-500 bg-white/5 px-2 py-1 rounded border border-white/5 max-w-[250px] md:max-w-md">
+                                 <span className="w-1.5 h-1.5 rounded-full bg-neon-blue animate-pulse"></span>
+                                 <span className="truncate">{file.name}</span>
+                             </div>
                          </div>
                      </div>
-                     <button onClick={onCancel} className="text-gray-400 hover:text-white transition-colors p-2 hover:bg-white/10 rounded-full">
-                         <X className="w-6 h-6" />
+                     <button onClick={onCancel} className="w-12 h-12 flex items-center justify-center bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl transition-all text-gray-400 hover:text-white group">
+                         <X className="w-6 h-6 group-hover:rotate-90 transition-transform" />
                      </button>
                  </div>
 
-                 <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
+                 <div className="flex flex-col md:flex-row flex-1 overflow-hidden relative z-10">
                      
                      {/* Left: Mode Selection */}
-                     <div className="w-full md:w-1/3 p-6 bg-[#111] border-r border-white/5 flex flex-col gap-4 overflow-y-auto">
-                         <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">生成模式</h3>
+                     <div className="w-full md:w-[280px] lg:w-[320px] p-6 md:p-8 bg-black/40 border-r border-white/5 flex flex-col gap-4 overflow-y-auto custom-scrollbar">
+                         <div className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2 flex items-center gap-2">
+                             <span>模式选择</span>
+                             <div className="h-[1px] flex-1 bg-white/10"></div>
+                         </div>
                          
                          <button 
                             onClick={() => toggleMode('AUTO')}
-                            className={`p-5 rounded-2xl border-2 transition-all text-left group relative overflow-hidden ${mode === 'AUTO' ? 'border-neon-blue bg-neon-blue/5' : 'border-white/5 bg-white/5 hover:bg-white/10'}`}
+                            className={`p-5 rounded-2xl border transition-all text-left group relative overflow-hidden ${mode === 'AUTO' ? 'border-neon-blue/50 bg-neon-blue/10 shadow-lg bg-gradient-to-br from-neon-blue/5 to-transparent' : 'border-white/5 bg-white/5 hover:border-white/20'}`}
                          >
-                             <div className="flex justify-between items-start mb-2">
-                                 <BrainCircuit className={`w-6 h-6 ${mode === 'AUTO' ? 'text-neon-blue' : 'text-gray-500'}`} />
-                                 {mode === 'AUTO' && <div className="w-2 h-2 bg-neon-blue rounded-full shadow-[0_0_10px_#00f3ff]"></div>}
+                             <div className="flex justify-between items-start mb-3">
+                                 <BrainCircuit className={`w-7 h-7 ${mode === 'AUTO' ? 'text-neon-blue drop-shadow-md' : 'text-gray-500'}`} />
                              </div>
-                             <div className={`font-black text-lg ${mode === 'AUTO' ? 'text-white' : 'text-gray-400'}`}>算法生成</div>
-                             <div className="text-xs text-gray-500 mt-1 leading-relaxed">
-                                 通过 DSP 数据驱动自动分析生成谱面。
+                             <div className={`font-black text-xl tracking-wider uppercase ${mode === 'AUTO' ? 'text-white' : 'text-gray-400'}`}>智能布林</div>
+                             <div className="text-[11px] text-gray-500 mt-2 font-bold tracking-wide uppercase leading-relaxed">
+                                 基于 AI 的数据驱动谱面生成。
                              </div>
                          </button>
 
                          <button 
                             onClick={() => toggleMode('MANUAL')}
-                            className={`p-5 rounded-2xl border-2 transition-all text-left group relative overflow-hidden ${mode === 'MANUAL' ? 'border-white bg-white/5' : 'border-white/5 bg-white/5 hover:bg-white/10'}`}
+                            className={`p-5 rounded-2xl border transition-all text-left group relative overflow-hidden ${mode === 'MANUAL' ? 'border-white/50 bg-white/10 shadow-lg bg-gradient-to-br from-white/5 to-transparent' : 'border-white/5 bg-white/5 hover:border-white/20'}`}
                          >
-                             <div className="flex justify-between items-start mb-2">
-                                 <Mic2 className={`w-6 h-6 ${mode === 'MANUAL' ? 'text-white' : 'text-gray-500'}`} />
-                                 {mode === 'MANUAL' && <div className="w-2 h-2 bg-white rounded-full"></div>}
+                             <div className="flex justify-between items-start mb-3">
+                                 <Mic2 className={`w-7 h-7 ${mode === 'MANUAL' ? 'text-white drop-shadow-md' : 'text-gray-500'}`} />
                              </div>
-                             <div className={`font-black text-lg ${mode === 'MANUAL' ? 'text-white' : 'text-gray-400'}`}>空白工程</div>
-                             <div className="text-xs text-gray-500 mt-1 leading-relaxed">
-                                 创建空白谱面，使用编辑器自行创作或录制。
+                             <div className={`font-black text-xl tracking-wider uppercase ${mode === 'MANUAL' ? 'text-white' : 'text-gray-400'}`}>空白画板</div>
+                             <div className="text-[11px] text-gray-500 mt-2 font-bold tracking-wide uppercase leading-relaxed">
+                                 手动创建与录制谱面。
                              </div>
                          </button>
 
-                         {/* Common Options */}
-                         <div className="mt-auto space-y-4 pt-6 border-t border-white/5">
-                             <div className="space-y-2">
-                                 <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">轨道数量</label>
-                                 <div className="flex gap-2">
-                                     {[4, 6].map(k => (
-                                         <button
-                                             key={k}
-                                             onClick={() => setLaneCount(k as LaneCount)}
-                                             className={`flex-1 py-3 rounded-xl font-black text-sm transition-all border ${laneCount === k ? 'bg-white text-black border-white' : 'bg-black text-gray-500 border-white/10 hover:border-white/30'}`}
-                                         >
-                                             {k}K
-                                         </button>
-                                     ))}
-                                 </div>
+                         <div className="mt-8">
+                             <div className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                 <span>按键数量</span>
+                                 <div className="h-[1px] flex-1 bg-white/10"></div>
+                             </div>
+                             <div className="flex gap-3">
+                                 {[4, 6].map(k => (
+                                     <button
+                                         key={k}
+                                         onClick={() => setLaneCount(k as LaneCount)}
+                                         className={`flex-1 py-4 rounded-xl font-black text-lg transition-all border ${laneCount === k ? 'bg-white text-black border-white shadow-[0_0_20px_rgba(255,255,255,0.3)]' : 'bg-black text-gray-500 border-white/10 hover:border-white/30 hover:text-white'}`}
+                                     >
+                                         {k}K
+                                     </button>
+                                 ))}
                              </div>
                          </div>
                      </div>
 
                      {/* Right: Detailed Config */}
-                     <div className="flex-1 p-6 md:p-8 bg-[#0f172a] overflow-y-auto custom-scrollbar relative">
+                     <div className="flex-1 flex flex-col relative w-full pt-6 md:pt-8 px-6 md:px-12 bg-transparent text-left h-full">
                          {mode === 'AUTO' ? (
-                             <div className="space-y-10 animate-fade-in pb-20">
+                             <div className="space-y-12 animate-slide-up pb-32 overflow-y-auto custom-scrollbar flex-1 pr-4">
                                  
                                  {/* Difficulty Slider */}
-                                 <div className="space-y-4">
-                                     <div className="flex justify-between items-end">
-                                         <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                                             <Layers className="w-4 h-4 text-gray-400"/> 难度等级
-                                         </h3>
-                                         <div className={`text-3xl font-black tracking-tighter font-sans ${diffColor(difficulty || 10)}`}>
+                                 <div className="space-y-6">
+                                     <div className="flex justify-between items-end border-b border-white/5 pb-2">
+                                         <div className="flex items-center gap-3">
+                                             <div className="p-2 bg-white/5 rounded-lg"><Layers className="w-4 h-4 text-white"/></div>
+                                             <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">目标难度</h3>
+                                         </div>
+                                         <div className={`text-4xl font-black italic tracking-tighter ${diffColor(difficulty || 10)} drop-shadow-md`}>
                                              {getDiffLabel(difficulty || 10)}
                                          </div>
                                      </div>
                                      
-                                     <div className="relative h-12 flex items-center group">
-                                         <div className="absolute inset-0 bg-white/5 rounded-xl border border-white/5 group-hover:border-white/10 transition-colors"></div>
-                                         <div 
-                                            className="absolute left-2 right-2 h-2 rounded-full overflow-hidden bg-gray-800"
-                                         >
+                                     <div className="relative pt-4 pb-2">
+                                         <div className="absolute inset-0 bg-black/40 rounded-2xl border border-white/5 pointer-events-none"></div>
+                                         <div className="relative h-4 mx-4 rounded-full bg-black border border-white/10 flex items-center">
                                              <div 
-                                                className={`h-full transition-all duration-300 ${difficulty! <= 10 ? 'bg-gradient-to-r from-green-400 to-blue-500' : 'bg-gradient-to-r from-blue-500 via-orange-500 to-red-600'}`}
+                                                className={`absolute left-0 h-full rounded-full transition-all duration-300 ${difficulty! <= 10 ? 'bg-gradient-to-r from-neon-blue to-green-400' : 'bg-gradient-to-r from-yellow-400 to-red-500'} shadow-[0_0_15px_currentColor] opacity-80`}
                                                 style={{ width: `${(difficulty! / 20) * 100}%` }}
                                              ></div>
+                                             <div 
+                                                className="absolute w-6 h-6 bg-white rounded-full shadow-[0_0_15px_rgba(255,255,255,0.8)] -ml-3 pointer-events-none flex items-center justify-center transition-all duration-300"
+                                                style={{ left: `${(difficulty! / 20) * 100}%` }}
+                                             >
+                                                <div className="w-2 h-2 rounded-full bg-black"></div>
+                                             </div>
                                          </div>
                                          <input 
                                              type="range" min="1" max="20" step="1"
@@ -256,7 +262,7 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                                              className="absolute inset-0 w-full opacity-0 cursor-pointer z-10"
                                          />
                                      </div>
-                                     <div className="flex justify-between text-[10px] text-gray-500 font-bold uppercase tracking-widest px-1">
+                                     <div className="flex justify-between text-[9px] text-gray-500 font-black uppercase tracking-widest px-4">
                                          <span>入门</span>
                                          <span>进阶</span>
                                          <span>专家</span>
@@ -265,65 +271,76 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                                  </div>
 
                                  {/* Style Presets */}
-                                 <div className="space-y-4">
-                                     <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                                         <BrainCircuit className="w-4 h-4 text-gray-400"/> 风格倾向
-                                     </h3>
-                                     <div className="grid grid-cols-2 gap-3">
+                                 <div className="space-y-6">
+                                     <div className="flex items-center gap-3 border-b border-white/5 pb-2">
+                                          <div className="p-2 bg-white/5 rounded-lg"><SlidersHorizontal className="w-4 h-4 text-white"/></div>
+                                          <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">谱面风格</h3>
+                                     </div>
+                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                          {STYLE_PRESETS.map(p => (
                                              <button
                                                  key={p.id}
                                                  onClick={() => setStyle(p.id)}
-                                                 className={`p-3 rounded-xl border text-left transition-all relative overflow-hidden ${style === p.id ? 'border-white/40 bg-white/5' : 'border-white/5 bg-black/20 hover:bg-white/5'}`}
+                                                 className={`p-4 rounded-2xl border text-left transition-all relative overflow-hidden group ${style === p.id ? 'border-white/30 bg-white/10 shadow-lg' : 'border-white/5 bg-black/40 hover:bg-white/5 hover:border-white/20'}`}
                                              >
-                                                 {style === p.id && <div className={`absolute left-0 top-0 bottom-0 w-1 ${p.color}`}></div>}
-                                                 <div className={`font-bold text-sm ${style === p.id ? 'text-white' : 'text-gray-400'}`}>{p.label}</div>
-                                                 <div className="text-[10px] text-gray-600">{p.desc}</div>
+                                                 {style === p.id && <div className={`absolute inset-0 bg-gradient-to-br ${p.color} opacity-20 pointer-events-none`}></div>}
+                                                 <div className="flex items-center justify-between mb-1 relative z-10">
+                                                     <div className={`font-black tracking-widest uppercase ${style === p.id ? 'text-white' : 'text-gray-300'}`}>{p.label}</div>
+                                                     {style === p.id && <Check className="w-4 h-4 text-white" />}
+                                                 </div>
+                                                 <div className="text-[10px] text-gray-500 font-bold tracking-wide uppercase relative z-10">{p.desc}</div>
                                              </button>
                                          ))}
                                      </div>
                                  </div>
 
                                  {/* Features */}
-                                 <div className="space-y-4">
-                                     <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                                         <RefreshCw className="w-4 h-4 text-gray-400"/> 生成元素
-                                     </h3>
-                                     <div className="flex flex-wrap gap-2">
-                                         {[{k:'normal', l:'单点'}, {k:'holds', l:'长条'}, {k:'catch', l:'滑键'}].map(feat => (
+                                 <div className="space-y-6 pb-8">
+                                     <div className="flex items-center gap-3 border-b border-white/5 pb-2">
+                                         <div className="p-2 bg-white/5 rounded-lg"><Zap className="w-4 h-4 text-white"/></div>
+                                         <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">音符元素</h3>
+                                     </div>
+                                     <div className="flex flex-wrap gap-3">
+                                         {[{k:'normal', l:'单键'}, {k:'holds', l:'长按'}, {k:'catch', l:'滑键'}].map(feat => (
                                              <button
                                                  key={feat.k}
                                                  onClick={() => setFeatures({...features, [feat.k]: !features[feat.k as keyof typeof features]})}
-                                                 className={`px-4 py-2 rounded-lg text-xs font-bold border transition-all flex items-center gap-2 ${features[feat.k as keyof typeof features] ? 'bg-white text-black border-white' : 'bg-black text-gray-500 border-white/10'}`}
+                                                 className={`px-5 py-3 rounded-xl text-xs font-black tracking-widest uppercase border transition-all flex items-center gap-3 ${features[feat.k as keyof typeof features] ? 'bg-white text-black border-white shadow-[0_0_15px_rgba(255,255,255,0.4)]' : 'bg-black/50 text-gray-500 border-white/10 hover:border-white/30 hover:text-white'}`}
                                              >
-                                                 {features[feat.k as keyof typeof features] && <Check className="w-3 h-3"/>}
+                                                 <div className={`w-3 h-3 rounded flex items-center justify-center border ${features[feat.k as keyof typeof features] ? 'bg-black border-black' : 'border-gray-600'}`}>
+                                                     {features[feat.k as keyof typeof features] && <Check className="w-2 h-2 text-white"/>}
+                                                 </div>
                                                  {feat.l}
                                              </button>
                                          ))}
                                      </div>
                                  </div>
-
-
-
                              </div>
                          ) : (
-                             <div className="h-full flex flex-col justify-center items-center text-center opacity-50">
-                                 <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center mb-4">
-                                     <Mic2 className="w-8 h-8 text-white" />
+                             <div className="flex-1 flex flex-col justify-center items-center text-center opacity-40 mb-20">
+                                 <div className="w-32 h-32 rounded-full border-2 border-dashed border-white/20 flex items-center justify-center mb-6 relative group">
+                                     <div className="absolute inset-4 rounded-full bg-white/5 group-hover:bg-white/10 transition-colors"></div>
+                                     <Mic2 className="w-12 h-12 text-white relative z-10" />
                                  </div>
-                                 <p className="text-sm text-gray-400">手动模式下无需额外配置。</p>
+                                 <h3 className="text-2xl font-black text-white tracking-widest uppercase mb-2">空白画板</h3>
+                                 <p className="text-xs font-bold text-gray-500 tracking-wider uppercase max-w-sm">
+                                     引擎将初始化一个不带AI生成的曲目。使用编辑器手动作曲。
+                                 </p>
                              </div>
                          )}
 
-                         {/* Confirm Button (Floating) */}
-                         <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-[#0f172a] to-transparent">
+                         {/* Confirm Action */}
+                         <div className="absolute bottom-0 left-0 right-0 p-6 md:p-8 bg-gradient-to-t from-[#0a0a0c] via-[#0a0a0c]/90 to-transparent">
                              <button 
                                 onClick={handleConfirm}
-                                className={`w-full py-4 rounded-xl font-black text-lg uppercase tracking-widest hover:scale-[1.02] transition-all shadow-xl active:scale-95 flex items-center justify-center gap-3
-                                    ${mode === 'AUTO' ? 'bg-neon-blue text-black hover:bg-white' : 'bg-white text-black'}
+                                className={`w-full py-5 rounded-2xl font-black text-lg uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-4 relative overflow-hidden group border
+                                    ${mode === 'AUTO' ? 'bg-white text-black border-white hover:shadow-[0_0_40px_rgba(255,255,255,0.3)]' : 'bg-[#111] text-white border-white/20 hover:border-white/50 hover:bg-[#1a1a1a]'}
                                 `}
                              >
-                                 {mode === 'AUTO' ? '开始生成' : '创建工程'}
+                                 <div className="absolute inset-0 w-1/4 bg-gradient-to-r from-transparent via-white to-transparent opacity-0 group-hover:opacity-20 -skew-x-12 -translate-x-full group-hover:translate-x-[400%] transition-all duration-1000 ease-in-out"></div>
+                                 
+                                 <span className="relative z-10">{mode === 'AUTO' ? '生成 AI 谱面' : '创建空白项目'}</span>
+                                 <ChevronRight className="w-6 h-6 relative z-10 group-hover:translate-x-1 transition-transform" />
                              </button>
                          </div>
                      </div>

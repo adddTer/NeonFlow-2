@@ -47,6 +47,8 @@ export interface Note {
   isHolding: boolean; // 是否正在被按住
   type: NoteType; // 新增：音符类型
   missed?: boolean; // 新增：是否已判定为 Miss (用于视觉变灰)
+  holdScoreTarget?: number;
+  holdScoreGained?: number;
   
   // Audio Features for Visuals
   pitch?: number;

@@ -219,7 +219,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
         <div className="flex flex-col h-screen w-full bg-[#0a0a0a] text-white overflow-hidden">
             
             {/* Top Toolbar */}
-            <div className="h-14 bg-[#111] border-b border-white/10 flex items-center justify-between px-4 shrink-0 z-50 shadow-md">
+            <div className="h-14 bg-[#111] border-b border-white/10 flex items-center justify-between px-4 shrink-0 z-50 shadow-md overflow-x-auto custom-scrollbar whitespace-nowrap">
                 
                 {/* Left: Exit & Title */}
                 <div className="flex items-center gap-4 min-w-[200px]">
@@ -237,7 +237,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
                             {editor.hasUnsavedChanges && <span className="text-neon-blue mr-1">*</span>}
                             {song.title}
                         </div>
-                        <div className="text-[10px] text-neon-blue font-bold tracking-wider uppercase">Chart Editor</div>
+                        <div className="text-[10px] text-neon-blue font-bold tracking-wider uppercase">谱面编辑器</div>
                     </div>
                 </div>
 
@@ -324,10 +324,10 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
             </div>
 
             {/* Main Area */}
-            <div className="flex-1 relative overflow-hidden flex">
+            <div className="flex-1 relative overflow-hidden flex flex-col md:flex-row">
                 
-                {/* Left Sidebar (Properties / Copilot) */}
-                <div className="w-0 md:w-96 bg-[#0f0f0f] border-r border-white/5 hidden md:flex flex-col shrink-0 relative z-20">
+                {/* Left Sidebar (Properties / Copilot) -> Bottom on Mobile */}
+                <div className="h-72 md:h-auto w-full md:w-72 lg:w-80 bg-[#0f0f0f] border-t md:border-t-0 md:border-r border-white/5 flex flex-col shrink-0 relative z-20 order-2 md:order-1">
                     
                     {/* Sidebar Tabs */}
                     <div className="flex border-b border-white/5 bg-[#111]">
@@ -583,7 +583,7 @@ export const EditorScreen: React.FC<EditorScreenProps> = ({ song, onExit, onSave
                 </div>
 
                 {/* Canvas Area */}
-                <div className={`flex-1 relative bg-[#050505] shadow-inner ${isRecording ? 'ring-2 ring-inset ring-red-500/50' : ''}`}>
+                <div className={`flex-1 relative bg-[#050505] shadow-inner order-1 md:order-2 ${isRecording ? 'ring-2 ring-inset ring-red-500/50' : ''}`}>
                      <EditorCanvas 
                         notes={editor.notes}
                         currentTime={editor.currentTime}

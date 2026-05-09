@@ -86,10 +86,10 @@ export const SongDetailsModal: React.FC<SongDetailsModalProps> = ({ song, onClos
                         <div className="flex flex-wrap gap-2 mb-4">
                             <span className="px-3 py-1 rounded-full bg-white/10 border border-white/5 text-[10px] font-bold text-white uppercase tracking-wider backdrop-blur-md flex items-center gap-1.5">
                                 <Zap className="w-3 h-3 text-yellow-400" />
-                                {song.difficultyRating.toFixed(1)} Difficulty
+                                {song.difficultyRating.toFixed(1)} 难度
                             </span>
                             <span className="px-3 py-1 rounded-full bg-white/10 border border-white/5 text-[10px] font-bold text-white uppercase tracking-wider backdrop-blur-md">
-                                {song.laneCount} KEY
+                                {song.laneCount} 键
                             </span>
                         </div>
                         <h1 className="text-3xl md:text-5xl font-black text-white leading-tight mb-2 tracking-tight line-clamp-2 drop-shadow-lg">
@@ -106,7 +106,7 @@ export const SongDetailsModal: React.FC<SongDetailsModalProps> = ({ song, onClos
                             <Clock className="w-5 h-5 text-gray-500 mb-2" />
                             <div>
                                 <div className="text-xl font-bold text-white">{formatTime(song.duration)}</div>
-                                <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Length</div>
+                                <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">时长</div>
                             </div>
                         </div>
                         <div className="bg-black/30 backdrop-blur-md rounded-2xl p-4 border border-white/5 flex flex-col justify-between">
@@ -120,7 +120,7 @@ export const SongDetailsModal: React.FC<SongDetailsModalProps> = ({ song, onClos
                             <Music className="w-5 h-5 text-gray-500 mb-2" />
                             <div>
                                 <div className="text-xl font-bold text-white">{song.notes.length}</div>
-                                <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Notes</div>
+                                <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">音符数</div>
                             </div>
                         </div>
                     </div>
@@ -168,16 +168,16 @@ export const SongDetailsModal: React.FC<SongDetailsModalProps> = ({ song, onClos
                                 className="hidden md:flex px-6 py-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-white font-bold transition-all items-center gap-2 group"
                             >
                                 <Edit3 className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                                <span className="uppercase tracking-wider text-xs">Edit</span>
+                                <span className="uppercase tracking-wider text-xs">编辑谱面</span>
                             </button>
                         )}
                         <button 
                             onClick={() => onStart(song)} 
-                            className="flex-1 py-4 md:py-5 rounded-2xl bg-white text-black font-black text-lg uppercase tracking-[0.2em] hover:bg-neon-blue transition-all shadow-[0_0_30px_rgba(255,255,255,0.3)] hover:shadow-[0_0_50px_rgba(0,243,255,0.6)] hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-3 group relative overflow-hidden"
+                            className="flex-1 py-4 md:py-5 rounded-2xl bg-white text-black font-black text-lg uppercase tracking-widest hover:bg-neon-blue transition-all shadow-xl hover:shadow-cyan-400/50 hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-3 group relative overflow-hidden"
                         >
                             <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent -translate-x-full group-hover:animate-shine"></div>
                             <Play className="w-6 h-6 fill-current" />
-                            Start Game
+                            开始游戏
                         </button>
                     </div>
 
