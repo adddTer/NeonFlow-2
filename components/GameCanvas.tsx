@@ -277,14 +277,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       const ctx = audioContextRef.current;
       if (!ctx) return 0;
       
-      if (typeof ctx.getOutputTimestamp === 'function') {
+      if (status === GameStatus.Playing && ctx.state !== 'suspended' && typeof ctx.getOutputTimestamp === 'function') {
           const ts = ctx.getOutputTimestamp();
           if (ts.contextTime !== undefined && ts.performanceTime !== undefined && ts.contextTime > 0) {
               // Smooth interpolation between audio updates using high res performance timer
               const elapsedSinceTimestamp = (performance.now() - ts.performanceTime) / 1000;
-              const accurateContextTime = ts.contextTime + elapsedSinceTimestamp;
-              const realTimeElapsed = accurateContextTime - startTimeRef.current;
-              return (realTimeElapsed * playbackRateRef.current) - (audioOffsetRef.current / 1000);
+              
+              // Protect against stale timestamps (e.g. right after unpausing)
+              if (elapsedSinceTimestamp >= 0 && elapsedSinceTimestamp < 0.5) {
+                  const accurateContextTime = ts.contextTime + elapsedSinceTimestamp;
+                  const realTimeElapsed = accurateContextTime - startTimeRef.current;
+                  return (realTimeElapsed * playbackRateRef.current) - (audioOffsetRef.current / 1000);
+              }
           }
       }
 
@@ -298,6 +302,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     if (!audioContextRef.current) return;
     // Prevent manual input interference in Auto mode
     if (isAutoRef.current) return;
+    if (status !== GameStatus.Playing) return;
 
     const gameTime = getCurrentGameTime();
     const windowGood = BASE_HIT_WINDOW_GOOD * hitWindowMultiplierRef.current;
@@ -808,7 +813,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     // 1. Draw Holds Bodies
     for (let i = 0; i < notesRef.current.length; i++) {
         const note = notesRef.current[i];
-        if (note.time > gameTime + 6.0) break; // Optimization: Stop processing distant future holds
         if (!note.visible && !note.missed) continue;
         if (note.duration === 0) continue; // Skip normal notes for now
 
@@ -844,7 +848,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     // 2. Draw Note Heads & Handle Logic
     for (let i = 0; i < notesRef.current.length; i++) {
         const note = notesRef.current[i];
-        if (note.time > gameTime + 6.0) break; // Optimization: stop processing off-screen future notes
         
         if (!note.visible && !note.missed) continue;
         

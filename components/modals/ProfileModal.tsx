@@ -38,8 +38,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ songs, onClose }) =>
             })
             .sort((a, b) => b - a);
         
-        const top10 = ratings.slice(0, 10);
-        const rating = top10.length > 0 ? top10.reduce((a, b) => a + b, 0) / Math.min(top10.length, 10) : 0;
+        const top3 = ratings.slice(0, 3);
+        const sum3 = top3.reduce((a, b) => a + b, 0);
+        // 基于最佳的三首，不满三首其他的按0分算，也就是固定除以3
+        const rating = sum3 / 3;
 
         songs.forEach(song => {
             totalPlayCount += (song.playCount || 0);

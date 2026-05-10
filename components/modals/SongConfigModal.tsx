@@ -170,10 +170,10 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                      </button>
                  </div>
 
-                 <div className="flex flex-col md:flex-row flex-1 overflow-hidden relative z-10">
+                 <div className="flex flex-col md:flex-row flex-1 overflow-y-auto md:overflow-hidden relative z-10 custom-scrollbar">
                      
                      {/* Left: Mode Selection */}
-                     <div className="w-full md:w-[280px] lg:w-[320px] p-6 md:p-8 bg-black/40 border-r border-white/5 flex flex-col gap-4 overflow-y-auto custom-scrollbar">
+                     <div className="w-full md:w-[280px] lg:w-[320px] p-6 md:p-8 bg-black/40 border-b md:border-b-0 md:border-r border-white/5 flex flex-col gap-4 shrink-0 md:overflow-y-auto custom-scrollbar">
                          <div className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2 flex items-center gap-2">
                              <span>模式选择</span>
                              <div className="h-[1px] flex-1 bg-white/10"></div>
@@ -205,7 +205,7 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                              </div>
                          </button>
 
-                         <div className="mt-8">
+                         <div className="mt-4 md:mt-8">
                              <div className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-4 flex items-center gap-2">
                                  <span>按键数量</span>
                                  <div className="h-[1px] flex-1 bg-white/10"></div>
@@ -225,9 +225,9 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                      </div>
 
                      {/* Right: Detailed Config */}
-                     <div className="flex-1 flex flex-col relative w-full pt-6 md:pt-8 px-6 md:px-12 bg-transparent text-left h-full">
+                     <div className="flex-1 flex flex-col relative w-full pt-6 md:pt-8 px-6 md:px-12 bg-transparent text-left shrink-0 md:overflow-y-auto custom-scrollbar">
                          {mode === 'AUTO' ? (
-                             <div className="space-y-12 animate-slide-up pb-32 overflow-y-auto custom-scrollbar flex-1 pr-4">
+                             <div className="space-y-8 md:space-y-12 animate-slide-up pb-32 flex-1 md:pr-4">
                                  
                                  {/* Difficulty Slider */}
                                  <div className="space-y-6">
@@ -328,24 +328,28 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                                  </p>
                              </div>
                          )}
-
-                         {/* Confirm Action */}
-                         <div className="absolute bottom-0 left-0 right-0 p-6 md:p-8 bg-gradient-to-t from-[#0a0a0c] via-[#0a0a0c]/90 to-transparent">
-                             <button 
-                                onClick={handleConfirm}
-                                className={`w-full py-5 rounded-2xl font-black text-lg uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-4 relative overflow-hidden group border
-                                    ${mode === 'AUTO' ? 'bg-white text-black border-white hover:shadow-[0_0_40px_rgba(255,255,255,0.3)]' : 'bg-[#111] text-white border-white/20 hover:border-white/50 hover:bg-[#1a1a1a]'}
-                                `}
-                             >
-                                 <div className="absolute inset-0 w-1/4 bg-gradient-to-r from-transparent via-white to-transparent opacity-0 group-hover:opacity-20 -skew-x-12 -translate-x-full group-hover:translate-x-[400%] transition-all duration-1000 ease-in-out"></div>
-                                 
-                                 <span className="relative z-10">{mode === 'AUTO' ? '生成 AI 谱面' : '创建空白项目'}</span>
-                                 <ChevronRight className="w-6 h-6 relative z-10 group-hover:translate-x-1 transition-transform" />
-                             </button>
-                         </div>
                      </div>
                  </div>
-             </div>
-        </div>
-    );
-};
+                 
+                 {/* Fixed Confirm Action */}
+                 <div className="absolute bottom-0 left-0 right-0 pointer-events-none z-20 flex">
+                     <div className="hidden md:block w-[280px] lg:w-[320px] shrink-0"></div>
+                     <div className="flex-1 p-6 md:p-8 bg-gradient-to-t from-[#0a0a0c] via-[#0a0a0c]/90 via-60% to-transparent pointer-events-auto">
+                         <button 
+                            onClick={handleConfirm}
+                            className={`w-full py-5 rounded-2xl font-black text-lg uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-4 relative overflow-hidden group border
+                                ${mode === 'AUTO' ? 'bg-white text-black border-white hover:shadow-[0_0_40px_rgba(255,255,255,0.3)]' : 'bg-[#111] text-white border-white/20 hover:border-white/50 hover:bg-[#1a1a1a]'}
+                            `}
+                         >
+                             <div className="absolute inset-0 w-1/4 bg-gradient-to-r from-transparent via-white to-transparent opacity-0 group-hover:opacity-20 -skew-x-12 -translate-x-full group-hover:translate-x-[400%] transition-all duration-1000 ease-in-out"></div>
+                             
+                             <span className="relative z-10">{mode === 'AUTO' ? '生成 AI 谱面' : '创建空白项目'}</span>
+                             <ChevronRight className="w-6 h-6 relative z-10 group-hover:translate-x-1 transition-transform" />
+                         </button>
+                     </div>
+                 </div>
+
+              </div>
+         </div>
+     );
+ };

@@ -269,6 +269,21 @@ class ErgonomicPhysics {
 
 // ... PatternLibrary remains unchanged ...
 const PatternLibrary = {
+    getSlideStream: (startTime: number, duration: number, startLane: number, laneCount: number) => {
+        const notes: any[] = [];
+        const interval = 0.05; // Dense 50ms interval for satisfying swoosh
+        const count = Math.max(3, Math.floor(duration / interval));
+        const endLane = startLane < laneCount / 2 ? laneCount - 1 : 0;
+        
+        for(let i = 0; i < count; i++) {
+            const progress = i / (count - 1);
+            // Smooth easing for the slide
+            const easeProgress = progress * progress * (3 - 2 * progress); 
+            const floatLane = startLane + (endLane - startLane) * easeProgress;
+            notes.push({ time: startTime + i * interval, lane: Math.round(floatLane) });
+        }
+        return notes;
+    },
     getStair: (startTime: number, count: number, interval: number, startLane: number, dir: 1 | -1, laneCount: number) => {
         const notes: any[] = [];
         for(let i=0; i<count; i++) {
@@ -368,6 +383,7 @@ export const generateBeatmap = (
     let noteIndex = 0;
     let lastGeneratedTime = -10.0; 
     let isCatchChain = false; 
+    let catchDirection = 1;
     
     // Rhythm & Structure Analysis Constants
     const beatDur = 60 / structure.bpm;
@@ -454,6 +470,36 @@ export const generateBeatmap = (
             const nextOnset = onsets[noteIndex+1];
             const interval = nextOnset.time - onset.time;
             
+            // Generate dense Catch streams for long slides or smooth pitch changes
+            const isExplicitSlide = desc.flow === 'slide' && features.catch;
+            const isSwooping = isExplicitSlide && ((onset.duration && onset.duration > 0.25) || interval > 0.35);
+
+            if (isSwooping) {
+                const slideDuration = onset.duration && onset.duration > 0.25 ? Math.min(onset.duration, 1.5) : Math.min(interval, 1.0);
+                const startL = getPitchLaneTarget(onset.pitch) ?? Math.floor(Math.random() * laneCount);
+                const slidePattern = PatternLibrary.getSlideStream(onset.time, slideDuration, startL, laneCount);
+                
+                // Consume all onsets that fall into this slide's timeframe to prevent clumps
+                let notesConsumed = 0;
+                for(let k = 1; k < onsets.length - noteIndex; k++) {
+                    if (onsets[noteIndex + k].time < onset.time + slideDuration - 0.05) {
+                        notesConsumed++;
+                    } else {
+                        break;
+                    }
+                }
+
+                slidePattern.forEach(p => {
+                    physics.commit([p.lane], p.time); 
+                    notes.push(createNote(p.time, p.lane, 0, 'CATCH', onset));
+                    lastGeneratedTime = p.time;
+                });
+                
+                noteIndex += notesConsumed;
+                isCatchChain = true;
+                continue;
+            }
+
             if (interval < 0.4 && interval >= config.minGap * 0.8) {
                 let generatedPattern: any[] = [];
                 let notesConsumed = 0;
@@ -561,7 +607,14 @@ export const generateBeatmap = (
         // If it's a catch chain/ghost note, try to use the last lane to create a slide.
         let preferredLane = getPitchLaneTarget(onset.pitch);
         if (isCatchChain || isGhostNote) {
-            if (notes.length > 0) preferredLane = notes[notes.length - 1].lane;
+            if (notes.length > 0) {
+                let nextLane = notes[notes.length - 1].lane + catchDirection;
+                if (nextLane < 0 || nextLane >= laneCount) {
+                    catchDirection *= -1;
+                    nextLane = notes[notes.length - 1].lane + catchDirection;
+                }
+                preferredLane = Math.max(0, Math.min(laneCount - 1, nextLane));
+            }
         }
         
         const lanes = physics.getBestLanes(simNotes, onset.time, config.allowedCost, style, desc.flow, isCatchGeneration, preferredLane);
@@ -703,24 +756,20 @@ export const generateBeatmap = (
 
             // --- Catch Logic (Overlap Allowed) ---
             if (features.catch && duration === 0) {
-                let catchChance = 0.05; 
+                let catchChance = 0.0; 
                 if (isGhostNote) catchChance = 1.0; // Force ghost notes to be CATCH
                 
                 if (isLaneHolding) {
                     catchChance = 1.0; 
                 } else if (activeHolds.length > 0) {
-                    catchChance += 0.4;
+                    catchChance += 0.6;
                 }
 
                 // Explicit Flow Logic for Meaningful Catch Notes
-                if (!isGhostNote) {
-                    if (desc.flow === 'slide') catchChance = 0.9;
-                    else if (isCatchChain) catchChance += 0.6; // Continue chain
-                    else if (desc.flow === 'random' && currentSection.intensity > 0.6) catchChance = 0.15; // Organic spawn
-                    else catchChance = 0; // DISABLE random catch notes if not in a chain or flow
-
-                    if (desc.flow === 'circular' && style === 'stream') catchChance += 0.3;
-                    if (desc.flow === 'linear' || desc.flow === 'zigzag') catchChance = 0; 
+                if (!isGhostNote && activeHolds.length === 0) {
+                    if (desc.flow === 'slide') catchChance = 0.6;
+                    else if (isCatchChain) catchChance = 0.8; // Maintain the chain once it starts
+                    else catchChance = 0; // DISABLE organic random single catch notes entirely
                 }
 
                 if (Math.random() < catchChance || isGhostNote) {
@@ -754,59 +803,96 @@ const createNote = (time: number, lane: number, duration: number, type: NoteType
     zcr: feature?.zcr,
     energy: feature?.energy
 });
-// ... calculateDifficultyRating remains unchanged ...
+
 export const calculateDifficultyRating = (notes: Note[], duration: number): number => {
     if (notes.length === 0 || duration === 0) return 0;
     const sortedNotes = [...notes].sort((a, b) => a.time - b.time);
-    const SECTION_LENGTH = 0.4;
+    const SECTION_LENGTH = 0.5;
     const sections: number[] = [];
     let currentSectionStrain = 0;
     let currentSectionStart = 0;
-    let previousNoteTime = 0;
+    let previousNoteTime = -1;
     let previousNoteLane = -1;
+
+    // Track last time each lane was hit to calculate jack strain
+    const lastLaneTimes = new Map<number, number>();
 
     for (let i = 0; i < sortedNotes.length; i++) {
         const note = sortedNotes[i];
+        
         while (note.time > currentSectionStart + SECTION_LENGTH) {
             sections.push(currentSectionStrain);
             currentSectionStrain = 0; 
             currentSectionStart += SECTION_LENGTH;
         }
-        const timeDelta = Math.max(note.time - previousNoteTime, 0.05);
-        let strain = 1 / timeDelta;
-        
-        // Weighting for CATCH (Slider) notes
-        if (note.type === 'CATCH') {
-            // Check for smooth flow (Close in time AND adjacent lane)
-            const isSmoothFlow = previousNoteLane !== -1 && 
-                                 Math.abs(note.lane - previousNoteLane) <= 1 && 
-                                 timeDelta < 0.25;
 
-            if (isSmoothFlow) {
-                strain *= 0.1; // Almost negligible difficulty for smooth slides
-            } else {
-                strain *= 0.8; // Standard catch weight
-            }
-        } 
-        // Weighting for Holds
-        else if (note.duration > 0) {
-            strain *= 0.95;
+        if (previousNoteTime === -1) {
+            previousNoteTime = note.time;
+            previousNoteLane = note.lane;
+            lastLaneTimes.set(note.lane, note.time);
+            currentSectionStrain += 1;
+            continue;
         }
 
-        if (note.lane === previousNoteLane) strain *= 1.5;
-        
+        const timeDelta = note.time - previousNoteTime;
+        let strain = 0;
+
+        if (timeDelta < 0.015) {
+            // It's a chord! Add a small flat strain for chord density
+            strain = 1.2; 
+        } else {
+            // Speed strain: base is 1 / (timeDelta^0.8) to penalize slow sections but reward speed
+            strain = 1.0 / Math.pow(Math.max(timeDelta, 0.04), 0.8);
+        }
+
+        // Catch flow logic
+        if (note.type === 'CATCH') {
+            const isSmoothFlow = previousNoteLane !== -1 && 
+                                 Math.abs(note.lane - previousNoteLane) <= 1 && 
+                                 timeDelta < 0.25 && timeDelta >= 0.015;
+
+            if (isSmoothFlow) {
+                strain *= 0.15; // Smooth slides are easy
+            } else {
+                strain *= 0.6; // General slides
+            }
+        } 
+        else if (note.duration > 0) {
+            strain *= 0.85; // Holds are slightly easier than standard click streams
+        }
+
+        // Jacking strain (same lane hit quickly)
+        const lastLaneTime = lastLaneTimes.get(note.lane) || -1;
+        if (lastLaneTime !== -1 && note.type !== 'CATCH') {
+            const laneDelta = note.time - lastLaneTime;
+            if (laneDelta > 0.015 && laneDelta < 0.2) {
+                strain += (0.2 / laneDelta) * 1.5;
+            }
+        }
+
         currentSectionStrain += strain;
         previousNoteTime = note.time;
         previousNoteLane = note.lane;
+        lastLaneTimes.set(note.lane, note.time);
     }
+    
     sections.push(currentSectionStrain);
     sections.sort((a, b) => b - a);
+    
     let diff = 0;
     let weight = 1.0;
-    const topSections = Math.min(sections.length, 30); 
+    const topSections = Math.min(sections.length, 40); 
     for (let i = 0; i < topSections; i++) {
         diff += sections[i] * weight;
-        weight *= 0.9;
+        weight *= 0.85;
     }
-    return Math.max(1, Math.sqrt(diff * 0.03) * 2.1);
+
+    // Baseline tuning
+    let finalRating = Math.pow(diff, 0.6) * 0.9;
+    
+    // Density bonus
+    const nps = notes.length / duration;
+    finalRating += nps * 0.2;
+
+    return Math.max(1, parseFloat(finalRating.toFixed(2)));
 };

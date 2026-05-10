@@ -39,11 +39,12 @@ export const useGameInput = ({
         };
 
         const handleKeyUp = (e: KeyboardEvent) => {
-            if (status !== GameStatus.Playing) return;
             const keyIndex = keysRef.current.indexOf(e.key.toLowerCase());
             if (keyIndex !== -1) {
-                keyStateRef.current[keyIndex] = false;
-                onRelease(keyIndex);
+                if (keyStateRef.current[keyIndex]) {
+                    keyStateRef.current[keyIndex] = false;
+                    onRelease(keyIndex);
+                }
             }
         };
 
@@ -92,9 +93,21 @@ export const useGameInput = ({
         }
     };
 
+    // Auto-release all inputs when exiting 'Playing' state
+    useEffect(() => {
+        if (status !== GameStatus.Playing) {
+            for (let i = 0; i < laneCountRef.current; i++) {
+                if (keyStateRef.current[i]) {
+                    keyStateRef.current[i] = false;
+                    onRelease(i);
+                }
+            }
+            activeTouchesRef.current.clear();
+        }
+    }, [status]);
+
     // --- Global Touch Handler ---
     const handleGlobalTouch = (e: React.TouchEvent) => {
-        if (status !== GameStatus.Playing) return;
         if (e.cancelable && e.type !== 'touchstart') {
             e.preventDefault();
         }

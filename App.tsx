@@ -172,11 +172,20 @@ function App() {
     };
     const onVisibilityChange = () => { if (document.hidden) handleAutoPause(); };
     const onBlur = () => { handleAutoPause(); };
+    
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("blur", onBlur);
+    
+    const interval = setInterval(() => {
+        if (status === GameStatus.Playing && !activeModifiers.has(GameModifier.Auto) && !document.hasFocus()) {
+            handleAutoPause();
+        }
+    }, 500);
+
     return () => {
         document.removeEventListener("visibilitychange", onVisibilityChange);
         window.removeEventListener("blur", onBlur);
+        clearInterval(interval);
     };
   }, [status, activeModifiers]);
 
@@ -277,19 +286,10 @@ function App() {
       if (status === GameStatus.Playing) setStatus(GameStatus.Paused); 
   };
   
-  const handlePauseRequest = (e: React.MouseEvent | React.TouchEvent) => {
-      e.stopPropagation();
-      e.preventDefault();
-      const now = Date.now();
-      if (now - pauseRequestTime < 1000) {
-          if (pauseTimeoutRef.current) clearTimeout(pauseTimeoutRef.current);
-          setPauseRequestTime(0);
-          pauseGame();
-      } else {
-          setPauseRequestTime(now);
-          if (pauseTimeoutRef.current) clearTimeout(pauseTimeoutRef.current);
-          pauseTimeoutRef.current = setTimeout(() => setPauseRequestTime(0), 1000);
-      }
+  const handlePauseRequest = (e: React.MouseEvent | React.TouchEvent | PointerEvent) => {
+      if (e && e.stopPropagation) e.stopPropagation();
+      if (e && e.preventDefault) e.preventDefault();
+      pauseGame();
   };
 
   const resumeGame = () => { 
@@ -316,6 +316,7 @@ function App() {
   const handleGameEnd = async (finalScore?: ScoreState) => {
     setStatus(GameStatus.Finished);
     const resultScore = finalScore || score;
+    setScore(resultScore);
     
     if (currentSongId) {
         const fullSong = await getSongById(currentSongId);
@@ -661,11 +662,6 @@ function App() {
                          <button className="p-3 bg-black/40 backdrop-blur-md border border-white/10 rounded-xl text-white/50 hover:text-white hover:bg-white/10 transition-all active:scale-95">
                              <Pause className="w-6 h-6" />
                          </button>
-                         {pauseRequestTime > 0 && (
-                             <div className="bg-black/80 text-white text-xs font-bold px-3 py-1.5 rounded-lg animate-fade-in whitespace-nowrap border border-white/20 pointer-events-none">
-                                 再次点击暂停
-                             </div>
-                         )}
                      </div>
                  )}
 
