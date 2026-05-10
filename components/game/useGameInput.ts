@@ -60,7 +60,17 @@ export const useGameInput = ({
         const laneW = laneWidthRef.current;
         const startX = startXRef.current;
         const count = laneCountRef.current;
-        const relativeX = touchX - startX;
+        
+        let relativeX = touchX - startX;
+        
+        // Lenient edge detection: If touch is outside the track, map it to the closest outer lane
+        // as long as it's within a reasonable distance (e.g., 2 lane widths)
+        if (relativeX < 0 && relativeX >= -laneW * 2.5) {
+            relativeX = 0;
+        } else if (relativeX >= count * laneW && relativeX <= count * laneW + laneW * 2.5) {
+            relativeX = (count * laneW) - 1;
+        }
+
         const index = Math.floor(relativeX / laneW);
         if (index >= 0 && index < count) return index;
         return -1;

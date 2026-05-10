@@ -30,9 +30,9 @@ const ACC_WEIGHT = 0.9;   // 900,000 points for Accuracy
 const COMBO_WEIGHT = 0.1; // 100,000 points for Combo
 
 // Hit Windows
-const BASE_HIT_WINDOW_PERFECT = 0.050; 
-const BASE_HIT_WINDOW_GOOD = 0.120; 
-const BASE_HIT_WINDOW_CATCH = 0.120; // Slightly lenient for catch
+const BASE_HIT_WINDOW_PERFECT = 0.080; 
+const BASE_HIT_WINDOW_GOOD = 0.160; 
+const BASE_HIT_WINDOW_CATCH = 0.200; // More lenient for catch
 
 const LEAD_IN_TIME = 2.0; 
 
@@ -81,6 +81,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const laneMissStateRef = useRef<number[]>([]); 
   const laneHitStateRef = useRef<number[]>([]); 
   const effectRef = useRef<HitEffect[]>([]);
+  const scoreUIRef = useRef<HTMLDivElement>(null);
   
   // Object Pools
   const particlesRef = useRef<Particle[]>([]);
@@ -231,11 +232,20 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   };
 
   // Memoize safe theme to prevent flickering colors
-  const safeTheme = useMemo(() => ({
-      ...theme,
-      primaryColor: ensureContrast(theme.primaryColor, '#00f3ff'),
-      secondaryColor: ensureContrast(theme.secondaryColor, '#bd00ff')
-  }), [theme]);
+  const safeTheme = useMemo(() => {
+      const t = { ...theme };
+      if (t.primaryColor === '#00f3ff') t.primaryColor = '#2dd4bf';
+      if (t.secondaryColor === '#bd00ff') t.secondaryColor = '#818cf8';
+      if (t.catchColor === '#f9f871') t.catchColor = '#f472b6';
+      if (t.perfectColor === '#ff00ff' || t.perfectColor === '#bd00ff') t.perfectColor = '#fbbf24';
+      if (t.goodColor === '#00f3ff') t.goodColor = '#38bdf8';
+
+      return {
+          ...t,
+          primaryColor: ensureContrast(t.primaryColor, '#2dd4bf'),
+          secondaryColor: ensureContrast(t.secondaryColor, '#818cf8')
+      };
+  }, [theme]);
 
   // Create refs for props to avoid stale closures in gameLoop
   const audioOffsetRef = useRef(audioOffset);
@@ -266,6 +276,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const getCurrentGameTime = () => {
       const ctx = audioContextRef.current;
       if (!ctx) return 0;
+      
+      if (typeof ctx.getOutputTimestamp === 'function') {
+          const ts = ctx.getOutputTimestamp();
+          if (ts.contextTime !== undefined && ts.performanceTime !== undefined && ts.contextTime > 0) {
+              // Smooth interpolation between audio updates using high res performance timer
+              const elapsedSinceTimestamp = (performance.now() - ts.performanceTime) / 1000;
+              const accurateContextTime = ts.contextTime + elapsedSinceTimestamp;
+              const realTimeElapsed = accurateContextTime - startTimeRef.current;
+              return (realTimeElapsed * playbackRateRef.current) - (audioOffsetRef.current / 1000);
+          }
+      }
+
       const outputLatency = (ctx as any).outputLatency || 0;
       const baseLatency = (ctx as any).baseLatency || 0;
       const realTimeElapsed = ctx.currentTime - startTimeRef.current;
@@ -279,15 +301,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
     const gameTime = getCurrentGameTime();
     const windowGood = BASE_HIT_WINDOW_GOOD * hitWindowMultiplierRef.current;
+    const HARDWARE_LATENCY_BIAS = 0.035; // Accounts for typical mobile touch + audio delay
 
     // Prioritize clicking non-Catch notes first (heads of normal/holds)
     const hitNote = notesRef.current.find(n => 
       !n.hit && !n.missed && n.lane === lane && n.type === 'NORMAL' && 
-      Math.abs(gameTime - n.time) < windowGood
+      Math.abs((gameTime - HARDWARE_LATENCY_BIAS) - n.time) < windowGood
     );
 
     if (hitNote) {
-      const diff = gameTime - hitNote.time;
+      // Use biased diff for timing calculation so late hits are forgiven
+      const diff = (gameTime - HARDWARE_LATENCY_BIAS) - hitNote.time;
       const absDiff = Math.abs(diff);
       
       let type: 'PERFECT' | 'GOOD' = 'GOOD';
@@ -332,7 +356,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       scoreRef.current.combo++;
       if (scoreRef.current.combo > scoreRef.current.maxCombo) scoreRef.current.maxCombo = scoreRef.current.combo;
       
-      onScoreUpdate({...scoreRef.current});
+      if (scoreUIRef.current) {
+          scoreUIRef.current.innerText = Math.round(scoreRef.current.score).toLocaleString();
+      }
     }
   };
 
@@ -347,8 +373,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
           const gameTime = getCurrentGameTime();
           const endTime = holdingNote.time + holdingNote.duration;
           
-          // Tolerance for early release (e.g., 200ms grace)
-          const earlyTolerance = 0.2 * hitWindowMultiplierRef.current;
+          // Tolerance for early release
+          const earlyTolerance = Math.min(0.2, holdingNote.duration * 0.4) * hitWindowMultiplierRef.current;
           
           if (gameTime < endTime - earlyTolerance) {
               // Released too early -> MISS / Break Combo
@@ -358,9 +384,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
               scoreRef.current.combo = 0;
               scoreRef.current.miss++;
               effectRef.current.push({ id: Math.random(), text: 'BREAK', time: performance.now(), lane: lane, color: '#888888', scale: 1.0 });
-              onScoreUpdate({...scoreRef.current});
+              if (scoreUIRef.current) scoreUIRef.current.innerText = Math.round(scoreRef.current.score).toLocaleString();
           } else {
-              // Released at end (Successful completion logic handled in gameLoop mostly, but we can finalize here)
+              // Released at end successfully
               if (holdingNote.holdScoreTarget && holdingNote.holdScoreTarget > 0) {
                   const remaining = holdingNote.holdScoreTarget - (holdingNote.holdScoreGained || 0);
                   if (remaining > 0) {
@@ -369,6 +395,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                   }
               }
               holdingNote.isHolding = false;
+              holdingNote.visible = false;
+              triggerHitVisuals(lane, 'PERFECT');
+              if (scoreUIRef.current) scoreUIRef.current.innerText = Math.round(scoreRef.current.score).toLocaleString();
           }
       }
   };
@@ -516,7 +545,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
   useEffect(() => {
     if (status === GameStatus.Playing && !audioContextRef.current) {
-      notesRef.current = JSON.parse(JSON.stringify(notes));
+      notesRef.current = JSON.parse(JSON.stringify(notes)).sort((a: Note, b: Note) => a.time - b.time);
       scoreRef.current = { score: 0, combo: 0, maxCombo: 0, perfect: 0, good: 0, miss: 0, hitHistory: [], modifiers };
       effectRef.current = []; 
       particlesRef.current.forEach(p => particlePoolRef.current.release(p));
@@ -777,15 +806,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     }
 
     // 1. Draw Holds Bodies
-    notesRef.current.forEach(note => {
-        if (!note.visible && !note.missed) return;
-        if (note.duration === 0) return; // Skip normal notes for now
+    for (let i = 0; i < notesRef.current.length; i++) {
+        const note = notesRef.current[i];
+        if (note.time > gameTime + 6.0) break; // Optimization: Stop processing distant future holds
+        if (!note.visible && !note.missed) continue;
+        if (note.duration === 0) continue; // Skip normal notes for now
 
         const headY = hitLineY - getVisualGap(note.time, gameTime, note.id) * speed; 
         const tailY = hitLineY - getVisualGap(note.time + note.duration, gameTime, note.id) * speed;
-        if (headY < viewLimitTop || tailY > viewLimitBottom) return; 
+        if (headY < viewLimitTop || tailY > viewLimitBottom) continue; 
 
-        if (hideNotesRef.current && !note.missed) return;
+        if (hideNotesRef.current && !note.missed) continue;
 
         let noteAnimOffsetX = 0;
         if (!isFrozen && hitLineY - headY > 0) { 
@@ -808,11 +839,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.fillRect(tailX, drawHeadY - drawHeight, tailW, drawHeight);
         ctx.fillStyle = note.missed ? '#444' : safeThemeRef.current.secondaryColor;
         ctx.fillRect(tailX, drawHeadY - drawHeight - 2, tailW, 4); 
-    });
+    }
 
     // 2. Draw Note Heads & Handle Logic
-    notesRef.current.forEach(note => {
-        if (!note.visible && !note.missed) return;
+    for (let i = 0; i < notesRef.current.length; i++) {
+        const note = notesRef.current[i];
+        if (note.time > gameTime + 6.0) break; // Optimization: stop processing off-screen future notes
+        
+        if (!note.visible && !note.missed) continue;
         
         // Auto Play
         if (isAutoRef.current && !note.hit && !note.missed && !isFrozen && gameTime >= note.time) {
@@ -836,21 +870,23 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             scoreRef.current.hitHistory.push(0);
 
             triggerHitVisuals(note.lane, 'PERFECT');
-            onScoreUpdate({...scoreRef.current});
+            if (scoreUIRef.current) scoreUIRef.current.innerText = Math.round(scoreRef.current.score).toLocaleString();
         }
 
         if (!isFrozen) {
             // Already hit/holding?
             if (note.hit && !note.missed && !note.isHolding) {
                 // Completely finished note, don't draw head
-                if (note.duration === 0) return;
+                if (note.duration === 0) continue;
             }
             
             // --- Catch Logic Upgrade: Check for "Hold-through" ---
             if (note.type === 'CATCH' && !note.hit && !note.missed && !isAutoRef.current) {
                  const windowCatch = BASE_HIT_WINDOW_CATCH * hitWindowMultiplierRef.current;
+                 const biasedTime = gameTime - 0.035; // HARDWARE_LATENCY_BIAS
                  // If key is CURRENTLY down (held) OR just pressed, allow catch
-                 if (Math.abs(gameTime - note.time) <= windowCatch && keyStateRef.current[note.lane]) {
+                 // Only resolve when note is very close to hit line to avoid early popping
+                 if (biasedTime >= note.time - 0.06 && biasedTime <= note.time + windowCatch && keyStateRef.current[note.lane]) {
                      note.hit = true; note.visible = false;
                      scoreRef.current.perfect++; scoreRef.current.combo++;
                      const totalNotes = notesRef.current.length || 1;
@@ -859,7 +895,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                      scoreRef.current.score = Math.min(MAX_SCORE, scoreRef.current.score + scorePerPerfect);
 
                      triggerHitVisuals(note.lane, 'PERFECT'); 
-                     onScoreUpdate({...scoreRef.current});
+                     if (scoreUIRef.current) scoreUIRef.current.innerText = Math.round(scoreRef.current.score).toLocaleString();
                  }
             }
             
@@ -869,7 +905,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                 laneMissStateRef.current[note.lane] = 0.8; 
                 effectRef.current.push({ id: Math.random(), text: 'MISS', time: performance.now(), lane: note.lane, color: '#888888', scale: 1.2 });
                 if (isSuddenDeathRef.current && !hasEndedRef.current) { hasEndedRef.current = true; onGameEnd(scoreRef.current); }
-                onScoreUpdate({...scoreRef.current});
+                if (scoreUIRef.current) scoreUIRef.current.innerText = Math.round(scoreRef.current.score).toLocaleString();
             }
             
             // Hold Logic: Ticks & Completion
@@ -889,6 +925,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                         if (toAdd > 0) {
                             scoreRef.current.score = Math.min(MAX_SCORE, scoreRef.current.score + toAdd);
                             note.holdScoreGained = expectedGain;
+                            if (scoreUIRef.current) scoreUIRef.current.innerText = Math.round(scoreRef.current.score).toLocaleString();
                         }
                     }
 
@@ -904,16 +941,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                     note.visible = false; 
                     note.isHolding = false; 
                     triggerHitVisuals(note.lane, 'PERFECT'); // Visual flourish on release
+                    if (scoreUIRef.current) scoreUIRef.current.innerText = Math.round(scoreRef.current.score).toLocaleString();
                 }
-                onScoreUpdate({...scoreRef.current});
             }
         }
         
         const headY = hitLineY - getVisualGap(note.time, gameTime, note.id) * speed; 
         
         // Skip drawing if out of view (for non-holding notes)
-        if (headY < viewLimitTop || headY > viewLimitBottom) return;
-        if (hideNotesRef.current && !note.missed) return;
+        if (headY < viewLimitTop || headY > viewLimitBottom) continue;
+        if (hideNotesRef.current && !note.missed) continue;
 
         let noteAnimOffsetX = 0;
         let noteAnimOffsetY = 0;
@@ -933,7 +970,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
         let noteColor = safeThemeRef.current.primaryColor; 
         if (note.missed) noteColor = '#444444';
-        else if (note.type === 'CATCH') noteColor = safeThemeRef.current.catchColor || '#f9f871';
+        else if (note.type === 'CATCH') noteColor = safeThemeRef.current.catchColor || '#f472b6';
         else if (note.duration > 0) noteColor = safeThemeRef.current.secondaryColor;
 
         // --- Audio Feature Visuals ---
@@ -995,7 +1032,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         } 
         ctx.globalAlpha = 1.0;
         ctx.shadowBlur = 0;
-    });
+    }
 
     if (isFlashlightRef.current) {
         ctx.save();
@@ -1083,7 +1120,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         style={{ touchAction: 'none' }} onTouchStart={handleGlobalTouch} onTouchMove={handleGlobalTouch} onTouchEnd={handleGlobalTouch} onTouchCancel={handleGlobalTouch}>
       <canvas ref={canvasRef} className="block w-full h-full" />
       <div className="absolute top-4 right-4 md:right-6 text-right pointer-events-none z-20 mix-blend-screen">
-          <div className="text-xl md:text-3xl font-black text-white tracking-tighter tabular-nums drop-shadow-md">
+          <div ref={scoreUIRef} className="text-xl md:text-3xl font-black text-white tracking-tighter tabular-nums drop-shadow-md">
               {Math.round(scoreRef.current.score).toLocaleString()}
           </div>
           <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest opacity-80">Score</div>

@@ -179,9 +179,9 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ songs, onClose }) =>
                                          textClass = 'text-cyan-300 drop-shadow-[0_0_5px_#67e8f9]';
                                      }
                                      else if (rank === 'SSS') {
-                                         colorClass = 'bg-[#ff00ff] border-pink-400';
-                                         shadowClass = 'shadow-[0_0_15px_rgba(255,0,255,0.4)]';
-                                         textClass = 'text-[#ff00ff]';
+                                         colorClass = 'bg-[#f472b6] border-pink-400';
+                                         shadowClass = 'shadow-[0_0_15px_rgba(244,114,182,0.4)]';
+                                         textClass = 'text-[#f472b6]';
                                      }
                                      else if (rank === 'SS') {
                                          colorClass = 'bg-yellow-400 border-yellow-300';

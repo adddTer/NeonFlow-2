@@ -153,7 +153,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                             <span className={`text-4xl font-black tabular-nums tracking-tighter ${color}`}>{accuracy.toFixed(2)}%</span>
                         </div>
                         <div className="h-3 bg-black rounded-full overflow-hidden border border-white/5">
-                            <div className={`h-full ${rank === 'F' ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : 'bg-neon-blue shadow-[0_0_10px_#00f3ff]'} transition-all duration-1000 ease-out`} style={{ width: `${animate ? accuracy : 0}%` }}></div>
+                            <div className={`h-full ${rank === 'F' ? 'bg-red-500 shadow-[0_0_10px_#ef4444]' : 'bg-neon-blue shadow-[0_0_10px_#2dd4bf]'} transition-all duration-1000 ease-out`} style={{ width: `${animate ? accuracy : 0}%` }}></div>
                         </div>
                     </div>
 

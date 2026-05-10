@@ -22,8 +22,8 @@ export const SongDetailsModal: React.FC<SongDetailsModalProps> = ({ song, onClos
         ? calculateAccuracy(song.bestResult.perfect, song.bestResult.good, song.notes.length)
         : 0;
 
-    const themeColor = song.theme?.primaryColor || '#00f3ff';
-    const secondaryColor = song.theme?.secondaryColor || '#bd00ff';
+    const themeColor = song.theme?.primaryColor || '#2dd4bf';
+    const secondaryColor = song.theme?.secondaryColor || '#818cf8';
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-xl p-4 animate-fade-in">

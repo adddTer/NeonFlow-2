@@ -160,10 +160,10 @@ export interface AITheme {
 }
 
 export const DEFAULT_THEME: AITheme = {
-  primaryColor: '#00f3ff', // Cyan
-  secondaryColor: '#bd00ff', // Purple
-  catchColor: '#f9f871', // Yellow
-  perfectColor: '#ff00ff', // Magenta
-  goodColor: '#00f3ff', // Cyan
-  moodDescription: 'Ready'
+  primaryColor: '#2dd4bf', // Teal 400
+  secondaryColor: '#818cf8', // Indigo 400
+  catchColor: '#f472b6', // Pink 400
+  perfectColor: '#fbbf24', // Amber 400
+  goodColor: '#38bdf8', // Sky 400
+  moodDescription: 'Neon Dream'
 };

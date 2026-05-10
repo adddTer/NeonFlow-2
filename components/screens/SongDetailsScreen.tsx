@@ -22,8 +22,8 @@ export const SongDetailsScreen: React.FC<SongDetailsScreenProps> = ({ song, onBa
         ? calculateAccuracy(song.bestResult.perfect, song.bestResult.good, song.notes.length)
         : 0;
 
-    const themeColor = song.theme?.primaryColor || '#00f3ff';
-    const secondaryColor = song.theme?.secondaryColor || '#bd00ff';
+    const themeColor = song.theme?.primaryColor || '#2dd4bf';
+    const secondaryColor = song.theme?.secondaryColor || '#818cf8';
 
     return (
         <div className="w-full h-full bg-[#050505] relative overflow-hidden flex flex-col animate-fade-in">

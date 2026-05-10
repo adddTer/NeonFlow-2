@@ -138,10 +138,10 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
 
   const getLevelDisplay = (rating: number) => {
       if (rating >= 20.0) return { val: 'Ω', color: '#ff0044', bg: 'bg-red-500' }; 
-      if (rating < 1.0) return { val: 1, color: '#00f3ff', bg: 'bg-cyan-500' }; 
+      if (rating < 1.0) return { val: 1, color: '#2dd4bf', bg: 'bg-teal-400' }; 
       
       const ranges = [
-          { max: 4.0, bg: 'bg-cyan-500', color: '#00f3ff' },
+          { max: 4.0, bg: 'bg-teal-400', color: '#2dd4bf' },
           { max: 7.0, bg: 'bg-green-500', color: '#00fa9a' },
           { max: 10.0, bg: 'bg-yellow-500', color: '#ffd700' },
           { max: 14.0, bg: 'bg-orange-500', color: '#ff8c00' },
@@ -151,7 +151,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
       for (const r of ranges) {
           if (rating < r.max) return { val: Math.floor(rating), color: r.color, bg: r.bg };
       }
-      return { val: Math.floor(rating), color: '#bd00ff', bg: 'bg-purple-600' };
+      return { val: Math.floor(rating), color: '#818cf8', bg: 'bg-indigo-400' };
   };
 
   const toggleSelection = (id: string, e: React.MouseEvent) => {
@@ -230,7 +230,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
                      </div>
                      {/* Center Hole */}
                      <div className="absolute inset-0 m-auto w-12 h-12 lg:w-16 lg:h-16 bg-[#0a0a0a] rounded-full border-4 border-black/80 flex items-center justify-center shadow-inner">
-                         <div className="w-2 h-2 lg:w-3 lg:h-3 bg-neon-blue rounded-full shadow-[0_0_15px_#00f3ff]"></div>
+                         <div className="w-2 h-2 lg:w-3 lg:h-3 bg-neon-blue rounded-full shadow-[0_0_15px_#2dd4bf]"></div>
                      </div>
                      {/* Gloss */}
                      <div className="absolute inset-0 bg-gradient-to-tr from-white/20 to-transparent pointer-events-none mix-blend-overlay"></div>
@@ -248,7 +248,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
                          </div>
                      </div>
 
-                     <h1 className="text-xl md:text-4xl lg:text-5xl font-black text-white italic tracking-tight leading-tight drop-shadow-2xl line-clamp-1 md:line-clamp-2 px-2" style={{ textShadow: `0 0 40px ${focusedSong.theme?.primaryColor || '#00f3ff'}66` }}>
+                     <h1 className="text-xl md:text-4xl lg:text-5xl font-black text-white italic tracking-tight leading-tight drop-shadow-2xl line-clamp-1 md:line-clamp-2 px-2" style={{ textShadow: `0 0 40px ${(focusedSong.theme?.primaryColor === '#00f3ff' ? '#2dd4bf' : focusedSong.theme?.primaryColor) || '#2dd4bf'}66` }}>
                          {focusedSong.title}
                      </h1>
                      <p className="hidden md:flex text-lg md:text-xl font-bold text-gray-400 tracking-tight items-center justify-center gap-2 line-clamp-1 px-4 mt-2">

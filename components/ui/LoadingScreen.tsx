@@ -80,7 +80,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ text, subText, pro
                     {progress !== undefined ? (
                         <>
                             <div 
-                                className="absolute inset-y-0 left-0 bg-neon-blue shadow-[0_0_15px_#00f3ff] transition-all duration-300 ease-out"
+                                className="absolute inset-y-0 left-0 bg-neon-blue shadow-[0_0_15px_#2dd4bf] transition-all duration-300 ease-out"
                                 style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
                             ></div>
                             <div 
@@ -89,7 +89,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ text, subText, pro
                             ></div>
                         </>
                     ) : (
-                        <div className="absolute inset-y-0 left-0 h-full w-[30%] bg-neon-blue shadow-[0_0_15px_#00f3ff] animate-[loadingLine_1.5s_infinite_ease-in-out]"></div>
+                        <div className="absolute inset-y-0 left-0 h-full w-[30%] bg-neon-blue shadow-[0_0_15px_#2dd4bf] animate-[loadingLine_1.5s_infinite_ease-in-out]"></div>
                     )}
                 </div>
             </div>

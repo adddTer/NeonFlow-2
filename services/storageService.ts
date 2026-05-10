@@ -34,13 +34,24 @@ export const saveSong = async (song: SavedSong): Promise<void> => {
   });
 };
 
+const migrateThemeColors = (song: SavedSong): SavedSong => {
+    if (song.theme) {
+        if (song.theme.primaryColor === '#00f3ff') song.theme.primaryColor = '#2dd4bf';
+        if (song.theme.secondaryColor === '#bd00ff') song.theme.secondaryColor = '#818cf8';
+        if (song.theme.catchColor === '#f9f871') song.theme.catchColor = '#f472b6';
+        if (song.theme.perfectColor === '#ff00ff' || song.theme.perfectColor === '#bd00ff') song.theme.perfectColor = '#fbbf24';
+        if (song.theme.goodColor === '#00f3ff') song.theme.goodColor = '#38bdf8';
+    }
+    return song;
+};
+
 export const getSongById = async (id: string): Promise<SavedSong | undefined> => {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_NAME, 'readonly');
     const store = transaction.objectStore(STORE_NAME);
     const request = store.get(id);
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => resolve(request.result ? migrateThemeColors(request.result as SavedSong) : undefined);
     request.onerror = () => reject(request.error);
   });
 };
@@ -56,7 +67,7 @@ export const getAllSongs = async (): Promise<SavedSong[]> => {
     request.onsuccess = (event) => {
         const cursor = (event.target as IDBRequest).result;
         if (cursor) {
-            const song = cursor.value as SavedSong;
+            const song = migrateThemeColors(cursor.value as SavedSong);
             
              if (song.notes) {
                  song.notes.forEach(note => {

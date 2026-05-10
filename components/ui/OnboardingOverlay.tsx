@@ -108,8 +108,8 @@ export const OnboardingOverlay: React.FC<OnboardingOverlayProps> = ({ onComplete
             </div>
             
             {/* Notes Falling */}
-            <div className="absolute top-[-20px] left-[25%] w-8 h-4 bg-neon-blue rounded-sm shadow-[0_0_15px_#00f3ff] animate-[fall_1.5s_linear_infinite]"></div>
-            <div className="absolute top-[-20px] left-[55%] w-8 h-4 bg-neon-purple rounded-sm shadow-[0_0_15px_#bd00ff] animate-[fall_1.2s_linear_infinite]" style={{ animationDelay: '0.6s' }}></div>
+            <div className="absolute top-[-20px] left-[25%] w-8 h-4 bg-neon-blue rounded-sm shadow-[0_0_15px_#2dd4bf] animate-[fall_1.5s_linear_infinite]"></div>
+            <div className="absolute top-[-20px] left-[55%] w-8 h-4 bg-neon-purple rounded-sm shadow-[0_0_15px_#818cf8] animate-[fall_1.2s_linear_infinite]" style={{ animationDelay: '0.6s' }}></div>
             
             {/* Hit Line */}
             <div className="absolute bottom-4 left-0 right-0 h-1 bg-white/50 shadow-[0_0_10px_white]"></div>
@@ -214,7 +214,7 @@ export const OnboardingOverlay: React.FC<OnboardingOverlayProps> = ({ onComplete
                             {STEPS.map((_, i) => (
                                 <div 
                                     key={i} 
-                                    className={`w-2 h-2 rounded-full transition-all duration-500 ${i === step ? 'bg-neon-blue w-6 shadow-[0_0_10px_#00f3ff]' : 'bg-white/20'}`}
+                                    className={`w-2 h-2 rounded-full transition-all duration-500 ${i === step ? 'bg-neon-blue w-6 shadow-[0_0_10px_#2dd4bf]' : 'bg-white/20'}`}
                                 ></div>
                             ))}
                         </div>

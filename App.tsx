@@ -547,7 +547,7 @@ function App() {
                          </div>
                          <div className="bg-white/5 p-3 rounded-xl border border-white/5 backdrop-blur-md flex flex-col items-center justify-center">
                              <div className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mb-1">按键</div>
-                             <div className="text-lg font-black text-white">{theme.primaryColor === '#bd00ff' ? '6K' : '4K'}</div>
+                             <div className="text-lg font-black text-white">{notes.some(n => n.lane > 3) ? '6K' : '4K'}</div>
                          </div>
                          <div className="bg-white/5 p-3 rounded-xl border border-white/5 backdrop-blur-md flex flex-col items-center justify-center">
                              <div className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mb-1">BPM</div>

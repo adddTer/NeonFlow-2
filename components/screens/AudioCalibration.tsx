@@ -74,9 +74,9 @@ export const AudioCalibration: React.FC<AudioCalibrationProps> = ({ initialOffse
       const calibTheme: AITheme = {
           primaryColor: '#ffffff',
           secondaryColor: '#333333',
-          catchColor: '#f9f871',
-          perfectColor: '#00f3ff',
-          goodColor: '#00f3ff',
+          catchColor: '#f472b6',
+          perfectColor: '#2dd4bf',
+          goodColor: '#2dd4bf',
           moodDescription: 'Calibration'
       };
 

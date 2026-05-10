@@ -52,7 +52,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     : 'border-transparent text-gray-500 hover:bg-white/5 hover:text-gray-300'
                 }`}
         >
-            <Icon className={`w-4 h-4 md:w-5 md:h-5 ${activeTab === id ? 'text-neon-blue drop-shadow-[0_0_5px_#00f3ff]' : 'opacity-50 group-hover:opacity-100 transition-opacity'}`} />
+            <Icon className={`w-4 h-4 md:w-5 md:h-5 ${activeTab === id ? 'text-neon-blue drop-shadow-[0_0_5px_#2dd4bf]' : 'opacity-50 group-hover:opacity-100 transition-opacity'}`} />
             {label}
         </button>
     );

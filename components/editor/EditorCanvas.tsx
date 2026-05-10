@@ -244,7 +244,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
             ctx.strokeRect(startX, regionYStart, TRACK_WIDTH, regionH);
             
             // Draw Label
-            ctx.fillStyle = '#bd00ff';
+            ctx.fillStyle = '#818cf8';
             ctx.font = 'bold 10px sans-serif';
             ctx.textAlign = 'left';
             ctx.fillText("AI 视窗", startX + TRACK_WIDTH + 10, regionYEnd - 5);

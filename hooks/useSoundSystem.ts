@@ -12,7 +12,7 @@ export const useSoundSystem = () => {
   useEffect(() => {
     const initAudio = () => {
       const Ctx = (window.AudioContext || (window as any).webkitAudioContext);
-      const ctx = new Ctx();
+      const ctx = new Ctx({ latencyHint: 'interactive' });
       audioContextRef.current = ctx;
 
       const masterGain = ctx.createGain();
