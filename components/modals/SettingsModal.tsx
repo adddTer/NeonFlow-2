@@ -24,6 +24,8 @@ interface SettingsModalProps {
     onRestartTutorial?: () => void;
     showKeys: boolean;
     setShowKeys: (b: boolean) => void;
+    showGuideLines: boolean;
+    setShowGuideLines: (b: boolean) => void;
 }
 
 type SettingsTab = 'GAMEPLAY' | 'CONTROLS' | 'SYSTEM';
@@ -37,7 +39,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     handleSaveSettings, validationError,
     rebindingKey, setRebindingKey, hasEnvKey,
     onRestartTutorial,
-    showKeys, setShowKeys
+    showKeys, setShowKeys,
+    showGuideLines, setShowGuideLines
 }) => {
     
     const [activeTab, setActiveTab] = useState<SettingsTab>('GAMEPLAY');
@@ -177,22 +180,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                                      {/* Show Keys Toggle (Desktop Only) */}
                                      {!isMobile && (
-                                         <div className="bg-[#111] border border-white/5 rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 hover:border-white/20 transition-colors relative overflow-hidden group">
-                                             <div className="absolute top-0 left-0 w-1 h-full bg-gray-400 opacity-50 group-hover:opacity-100 transition-opacity"></div>
-                                             <div className="flex items-center gap-4">
-                                                 <div className="p-3 bg-black border border-white/10 rounded-xl text-gray-300 drop-shadow-md"><Eye className="w-6 h-6" /></div>
-                                                 <div>
-                                                     <div className="font-black text-white text-lg tracking-tight">HUD 悬浮窗</div>
-                                                     <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">在轨道上显示按键绑定</div>
+                                         <>
+                                             <div className="bg-[#111] border border-white/5 rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 hover:border-white/20 transition-colors relative overflow-hidden group">
+                                                 <div className="absolute top-0 left-0 w-1 h-full bg-gray-400 opacity-50 group-hover:opacity-100 transition-opacity"></div>
+                                                 <div className="flex items-center gap-4">
+                                                     <div className="p-3 bg-black border border-white/10 rounded-xl text-gray-300 drop-shadow-md"><Eye className="w-6 h-6" /></div>
+                                                     <div>
+                                                         <div className="font-black text-white text-lg tracking-tight">HUD 悬浮窗</div>
+                                                         <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">在轨道上显示按键绑定</div>
+                                                     </div>
                                                  </div>
+                                                 <button 
+                                                    onClick={() => setShowKeys(!showKeys)}
+                                                    className={`w-16 h-8 rounded-full border-2 transition-all relative flex items-center px-1 ${showKeys ? 'bg-cyan-500/20 border-cyan-400' : 'bg-black border-gray-600'}`}
+                                                 >
+                                                     <div className={`w-5 h-5 rounded-full transition-transform ${showKeys ? 'bg-cyan-400 translate-x-8 shadow-[0_0_10px_#22d3ee]' : 'bg-gray-500 translate-x-0'}`}></div>
+                                                 </button>
                                              </div>
-                                             <button 
-                                                onClick={() => setShowKeys(!showKeys)}
-                                                className={`w-16 h-8 rounded-full border-2 transition-all relative flex items-center px-1 ${showKeys ? 'bg-cyan-500/20 border-cyan-400' : 'bg-black border-gray-600'}`}
-                                             >
-                                                 <div className={`w-5 h-5 rounded-full transition-transform ${showKeys ? 'bg-cyan-400 translate-x-8 shadow-[0_0_10px_#22d3ee]' : 'bg-gray-500 translate-x-0'}`}></div>
-                                             </button>
-                                         </div>
+                                             <div className="bg-[#111] border border-white/5 rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 hover:border-white/20 transition-colors relative overflow-hidden group">
+                                                 <div className="absolute top-0 left-0 w-1 h-full bg-cyan-500 opacity-50 group-hover:opacity-100 transition-opacity"></div>
+                                                 <div className="flex items-center gap-4">
+                                                     <div className="p-3 bg-black border border-white/10 rounded-xl text-gray-300 drop-shadow-md"><Gauge className="w-6 h-6" /></div>
+                                                     <div>
+                                                         <div className="font-black text-white text-lg tracking-tight">显示辅助线</div>
+                                                         <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">在屏幕上显示音符下落辅助线</div>
+                                                     </div>
+                                                 </div>
+                                                 <button 
+                                                    onClick={() => setShowGuideLines(!showGuideLines)}
+                                                    className={`w-16 h-8 rounded-full border-2 transition-all relative flex items-center px-1 ${showGuideLines ? 'bg-cyan-500/20 border-cyan-400' : 'bg-black border-gray-600'}`}
+                                                 >
+                                                     <div className={`w-5 h-5 rounded-full transition-transform ${showGuideLines ? 'bg-cyan-400 translate-x-8 shadow-[0_0_10px_#22d3ee]' : 'bg-gray-500 translate-x-0'}`}></div>
+                                                 </button>
+                                             </div>
+                                         </>
                                      )}
                                  </div>
                              )}

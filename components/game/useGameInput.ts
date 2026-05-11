@@ -12,6 +12,7 @@ interface UseGameInputProps {
     activeTouchesRef: MutableRefObject<Map<number, number>>;
     onHit: (lane: number) => void;
     onRelease: (lane: number) => void;
+    onAnyKeyHit?: () => void;
 }
 
 export const useGameInput = ({
@@ -23,13 +24,16 @@ export const useGameInput = ({
     startXRef,
     activeTouchesRef,
     onHit,
-    onRelease
+    onRelease,
+    onAnyKeyHit
 }: UseGameInputProps) => {
 
     // --- Keyboard Input ---
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (status !== GameStatus.Playing) return;
+            
+            if (onAnyKeyHit) onAnyKeyHit();
             
             const keyIndex = keysRef.current.indexOf(e.key.toLowerCase());
             if (keyIndex !== -1 && !keyStateRef.current[keyIndex]) {
@@ -106,39 +110,59 @@ export const useGameInput = ({
         }
     }, [status]);
 
-    // --- Global Touch Handler ---
-    const handleGlobalTouch = (e: React.TouchEvent) => {
-        if (e.cancelable && e.type !== 'touchstart') {
-            e.preventDefault();
-        }
+    // --- Native Global Touch Handlers ---
+    useEffect(() => {
+        if (status !== GameStatus.Playing) return;
 
-        const changed = e.changedTouches;
-        for (let i = 0; i < changed.length; i++) {
-            const t = changed[i];
-            const touchId = t.identifier;
-            const lane = getLaneFromTouchX(t.clientX);
-            
-            if (e.type === 'touchstart') {
-                if (lane !== -1) {
-                    activeTouchesRef.current.set(touchId, lane);
-                    engageLane(lane);
+        const handleNativeTouch = (e: TouchEvent) => {
+            if (e.cancelable && e.type !== 'touchstart') {
+                e.preventDefault(); // Prevent scrolling
+            }
+
+            if (e.type === 'touchstart' && onAnyKeyHit) {
+                onAnyKeyHit();
+            }
+
+            const changed = e.changedTouches;
+            for (let i = 0; i < changed.length; i++) {
+                const t = changed[i];
+                const touchId = t.identifier;
+                const lane = getLaneFromTouchX(t.clientX);
+                
+                if (e.type === 'touchstart') {
+                    if (lane !== -1) {
+                        activeTouchesRef.current.set(touchId, lane);
+                        engageLane(lane);
+                    }
+                } 
+                else if (e.type === 'touchmove') {
+                    const oldLane = activeTouchesRef.current.get(touchId);
+                    if (lane !== oldLane) {
+                        activeTouchesRef.current.set(touchId, lane);
+                        if (oldLane !== undefined && oldLane !== -1) disengageLane(oldLane);
+                        if (lane !== -1) engageLane(lane);
+                    }
                 }
-            } 
-            else if (e.type === 'touchmove') {
-                const oldLane = activeTouchesRef.current.get(touchId);
-                if (lane !== oldLane) {
-                    activeTouchesRef.current.set(touchId, lane);
+                else if (e.type === 'touchend' || e.type === 'touchcancel') {
+                    const oldLane = activeTouchesRef.current.get(touchId);
+                    activeTouchesRef.current.delete(touchId);
                     if (oldLane !== undefined && oldLane !== -1) disengageLane(oldLane);
-                    if (lane !== -1) engageLane(lane);
                 }
             }
-            else if (e.type === 'touchend' || e.type === 'touchcancel') {
-                const oldLane = activeTouchesRef.current.get(touchId);
-                activeTouchesRef.current.delete(touchId);
-                if (oldLane !== undefined && oldLane !== -1) disengageLane(oldLane);
-            }
-        }
-    };
+        };
 
-    return { handleGlobalTouch };
+        window.addEventListener('touchstart', handleNativeTouch, { passive: false });
+        window.addEventListener('touchmove', handleNativeTouch, { passive: false });
+        window.addEventListener('touchend', handleNativeTouch, { passive: false });
+        window.addEventListener('touchcancel', handleNativeTouch, { passive: false });
+
+        return () => {
+            window.removeEventListener('touchstart', handleNativeTouch);
+            window.removeEventListener('touchmove', handleNativeTouch);
+            window.removeEventListener('touchend', handleNativeTouch);
+            window.removeEventListener('touchcancel', handleNativeTouch);
+        };
+    }, [status]);
+
+    return { handleGlobalTouch: () => {} }; // Dummy return for backward compatibility if needed
 };

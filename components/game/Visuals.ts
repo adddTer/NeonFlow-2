@@ -72,6 +72,8 @@ export interface HitEffect {
     lane: number;
     color: string;
     scale: number;
+    x?: number;
+    y?: number;
 }
 
 export class ObjectPool<T> {

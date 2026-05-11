@@ -6,6 +6,7 @@ import { Particle, GhostNote, HitEffect, ObjectPool, GhostNoteObj } from './game
 import { useGameInput } from './game/useGameInput';
 
 interface GameCanvasProps {
+  playMode?: 'FALLING' | 'ORBIT';
   status: GameStatus;
   audioBuffer: AudioBuffer | null;
   notes: Note[];
@@ -20,6 +21,7 @@ interface GameCanvasProps {
   onScoreUpdate: (score: ScoreState) => void;
   onGameEnd: (finalScore: ScoreState) => void;
   showKeys?: boolean;
+  showGuideLines?: boolean;
 }
 
 const BASE_TARGET_WIDTH = 100; 
@@ -58,8 +60,8 @@ const ensureContrast = (hex: string, fallback: string): string => {
 };
 
 const GameCanvas: React.FC<GameCanvasProps> = ({ 
-  status, audioBuffer, notes, structure, theme, audioOffset, scrollSpeed,
-  keyBindings, modifiers, hideNotes, onScoreUpdate, onGameEnd, showKeys
+  playMode = 'FALLING', status, audioBuffer, notes, structure, theme, audioOffset, scrollSpeed,
+  keyBindings, modifiers, hideNotes, onScoreUpdate, onGameEnd, showKeys, showGuideLines
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -104,6 +106,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
   const smoothedIntensityRef = useRef<number>(0);
 
+  // Orbit Mode specific
+  interface PathNode { x: number; y: number; time: number; entryAngle: number; }
+  const pathNodesRef = useRef<PathNode[]>([]);
+  const cameraRef = useRef<{x: number, y: number}>({x: 0, y: 0});
+  const currentOrbitIdxRef = useRef<number>(0);
+
   const laneCountRef = useRef<LaneCount>(4);
   const keysRef = useRef<string[]>([]);
   const labelsRef = useRef<string[]>([]);
@@ -119,6 +127,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const lastFrameTimeRef = useRef(0);
 
   const hitFlashScaleRef = useRef<number>(0); // NEW: Global hit impact flash
+
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const dataArrayRef = useRef<Uint8Array | null>(null);
+  const envelopeRef = useRef(0);
 
   const { playHitSound } = useSoundSystem();
 
@@ -254,6 +266,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   hideNotesRef.current = hideNotes;
   const showKeysRef = useRef(showKeys);
   showKeysRef.current = showKeys;
+  const showGuideLinesRef = useRef(showGuideLines);
+  showGuideLinesRef.current = showGuideLines;
 
   const safeThemeRef = useRef(safeTheme);
   safeThemeRef.current = safeTheme;
@@ -299,14 +313,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   };
 
   const processHit = (lane: number) => {
-    if (!audioContextRef.current) return;
+    if (!audioContextRef.current || playMode === 'ORBIT') return;
     // Prevent manual input interference in Auto mode
     if (isAutoRef.current) return;
     if (status !== GameStatus.Playing) return;
 
     const gameTime = getCurrentGameTime();
     const windowGood = BASE_HIT_WINDOW_GOOD * hitWindowMultiplierRef.current;
-    const HARDWARE_LATENCY_BIAS = 0.035; // Accounts for typical mobile touch + audio delay
+    const HARDWARE_LATENCY_BIAS = 0; // Removed manual bias to allow precise zero-latency on PC. Rely on 'Audio Offset' for tuning.
 
     // Prioritize clicking non-Catch notes first (heads of normal/holds)
     const hitNote = notesRef.current.find(n => 
@@ -369,7 +383,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
   const processRelease = (lane: number) => {
       // Prevent manual input interference in Auto mode (stops accidental hold breaks)
-      if (isAutoRef.current) return;
+      if (isAutoRef.current || playMode === 'ORBIT') return;
 
       // Find note that is currently being held in this lane
       const holdingNote = notesRef.current.find(n => n.lane === lane && n.isHolding);
@@ -407,9 +421,52 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       }
   };
 
+  const handleOrbitInteract = (forceAuto: boolean = false) => {
+      if (status !== GameStatus.Playing || playMode !== 'ORBIT' || (isAutoRef.current && !forceAuto)) return;
+      const gameTime = getCurrentGameTime();
+      
+      const nextNote = notesRef.current[currentOrbitIdxRef.current];
+      if (!nextNote) return;
+
+      const diff = gameTime - nextNote.time;
+      const absoluteDiff = Math.abs(diff);
+      const hitWindow = 0.15; // 150ms
+
+      if (absoluteDiff <= hitWindow || forceAuto) {
+          nextNote.hit = true;
+          scoreRef.current.combo++;
+          scoreRef.current.perfect++;
+          if (scoreRef.current.combo > scoreRef.current.maxCombo) {
+              scoreRef.current.maxCombo = scoreRef.current.combo;
+          }
+          scoreRef.current.score += 1000000 / Math.max(1, notesRef.current.length);
+          
+          const activeNode: any = pathNodesRef.current[currentOrbitIdxRef.current];
+          const targetNode: any = pathNodesRef.current[currentOrbitIdxRef.current + 1];
+          const screenX = sizeRef.current.width / 2 - cameraRef.current.x + (targetNode ? targetNode.x : (activeNode ? activeNode.x : 0));
+          const screenY = sizeRef.current.height / 2 - cameraRef.current.y + (targetNode ? targetNode.y : (activeNode ? activeNode.y : 0));
+          triggerHitVisuals(1, 'PERFECT', screenX, screenY);
+          if (scoreUIRef.current) scoreUIRef.current.innerText = Math.round(scoreRef.current.score).toLocaleString();
+
+          currentOrbitIdxRef.current++;
+          onScoreUpdate({...scoreRef.current});
+      } else {
+          scoreRef.current.combo = 0;
+          scoreRef.current.miss++;
+          
+          const targetNode: any = pathNodesRef.current[currentOrbitIdxRef.current + 1] || pathNodesRef.current[currentOrbitIdxRef.current];
+          const screenX = sizeRef.current.width / 2 - cameraRef.current.x + (targetNode ? targetNode.x : 0);
+          const screenY = sizeRef.current.height / 2 - cameraRef.current.y + (targetNode ? targetNode.y : 0);
+          effectRef.current.push({ id: Math.random(), text: 'MISS', time: performance.now(), lane: 1, color: '#888888', scale: 1.2, x: screenX, y: screenY });
+
+          currentOrbitIdxRef.current++;
+          onScoreUpdate({...scoreRef.current});
+      }
+  };
+
   const { handleGlobalTouch } = useGameInput({
       status, laneCountRef, keysRef, keyStateRef, laneWidthRef, startXRef, activeTouchesRef,
-      onHit: processHit, onRelease: processRelease
+      onHit: processHit, onRelease: processRelease, onAnyKeyHit: handleOrbitInteract
   });
 
   useEffect(() => {
@@ -488,25 +545,37 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       const laneW = laneWidthRef.current;
       const startX = startXRef.current;
       
-      ctx.fillStyle = 'rgba(15, 20, 25, 0.7)'; 
-      ctx.fillRect(startX, 0, count * laneW, height);
+      // Draw Guide Lines
+      if (playMode !== 'ORBIT' && showGuideLinesRef.current) {
+          ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+          ctx.lineWidth = 1;
+          
+          // Outer borders
+          ctx.beginPath();
+          ctx.moveTo(startX, 0); ctx.lineTo(startX, height);
+          ctx.moveTo(startX + count * laneW, 0); ctx.lineTo(startX + count * laneW, height);
+          ctx.stroke();
 
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-      for (let i = 1; i < count; i++) {
-          ctx.fillRect(startX + i * laneW - 0.5, 0, 1, height);
+          // Inner dividers (dashed for a floating look)
+          ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+          ctx.setLineDash([10, 15]);
+          ctx.beginPath();
+          for (let i = 1; i < count; i++) {
+              let x = startX + i * laneW;
+              ctx.moveTo(x, 0);
+              ctx.lineTo(x, height);
+          }
+          ctx.stroke();
+          ctx.setLineDash([]);
       }
       
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-      ctx.fillRect(startX - 1, 0, 1, height);
-      ctx.fillRect(startX + count * laneW, 0, 1, height);
-
-      // Draw Key Labels if enabled and NOT mobile
-      if (showKeysRef.current && !isMobileRef.current && labelsRef.current.length > 0) {
+      // Draw Key Labels if enabled and NOT mobile 
+      if (playMode !== 'ORBIT' && showKeysRef.current && !isMobileRef.current && labelsRef.current.length > 0) {
           const hitLineY = height * 0.80; // Standard desktop hit line
-          ctx.font = 'bold 24px monospace';
+          ctx.font = 'bold 20px "Inter", "Outfit", "JetBrains Mono", sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillStyle = 'rgba(255,255,255,0.4)';
+          ctx.fillStyle = 'rgba(255,255,255,0.25)';
           
           for (let i = 0; i < count; i++) {
               const x = startX + i * laneW + laneW / 2;
@@ -527,7 +596,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     if (sourceRef.current) { try { sourceRef.current.stop(); } catch(e){} }
     const source = ctx.createBufferSource();
     source.buffer = audioBuffer;
-    source.connect(ctx.destination);
+    
+    // Setup Analyser
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256; 
+    analyser.smoothingTimeConstant = 0.4;
+    analyserRef.current = analyser;
+    dataArrayRef.current = new Uint8Array(analyser.frequencyBinCount);
+    
+    source.connect(analyser);
+    analyser.connect(ctx.destination);
+    
     source.playbackRate.value = playbackRateRef.current;
     const now = ctx.currentTime;
     if (offset === 0) {
@@ -561,6 +640,64 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       keyStateRef.current = new Array(laneCountRef.current).fill(false); 
       activeTouchesRef.current.clear();
       hasEndedRef.current = false;
+      
+      if (playMode === 'ORBIT') {
+          interface OrbitNode { x: number; y: number; time: number; startAngle: number; endAngle: number; isCW: boolean; }
+          const radius = 80;
+          let nodes: OrbitNode[] = [];
+          
+          let currX = 0;
+          let currY = 0;
+          let currentStartAngle = Math.PI; // Starts at left 
+          
+          let lastTime = 0;
+          
+          // Estimate base beat from common dt
+          let dts = [];
+          for (let i = 0; i < Math.min(20, notesRef.current.length); i++) {
+              if (i > 0) dts.push(notesRef.current[i].time - notesRef.current[i-1].time);
+          }
+          dts.sort();
+          const baseDt = dts.length > 0 ? dts[Math.floor(dts.length / 2)] : 0.5;
+          const ROTATION_SPEED = Math.PI / baseDt;
+          
+          for (let i = 0; i < notesRef.current.length; i++) {
+              const noteTime = notesRef.current[i].time;
+              const dt = Math.max(0.01, noteTime - lastTime);
+              
+              // ADOFAI style: alternate CW / CCW visually, or just spin CW continuously?
+              // In ADOFAI, if the path goes straight, the relative angle is PI.
+              // If we always orbit alternating, a straight path is just alternating PI.
+              const isCW = (i % 2 === 0);
+              
+              let angleDiff = dt * ROTATION_SPEED;
+              
+              // Quantize to neat angles (e.g., 45deg, 90deg, 180deg) to keep path clean
+              const snapAngles = [Math.PI/4, Math.PI/2, Math.PI*3/4, Math.PI, Math.PI*1.25, Math.PI*1.5, Math.PI*2];
+              let bestSnap = snapAngles[0];
+              for(const a of snapAngles) if(Math.abs(angleDiff - a) < Math.abs(angleDiff - bestSnap)) bestSnap = a;
+              angleDiff = bestSnap;
+              
+              const endAngle = currentStartAngle + (isCW ? angleDiff : -angleDiff);
+              
+              nodes.push({ x: currX, y: currY, time: lastTime, startAngle: currentStartAngle, endAngle: endAngle, isCW });
+              
+              const nextX = currX + Math.cos(endAngle) * radius;
+              const nextY = currY + Math.sin(endAngle) * radius;
+              
+              currX = nextX;
+              currY = nextY;
+              currentStartAngle = endAngle + Math.PI;
+              lastTime = noteTime;
+          }
+          // Push a final node so we can draw the exit path
+          nodes.push({ x: currX, y: currY, time: lastTime, startAngle: currentStartAngle, endAngle: currentStartAngle, isCW: true });
+
+          pathNodesRef.current = nodes as any;
+          cameraRef.current = { x: 0, y: 0 };
+          currentOrbitIdxRef.current = 0;
+      }
+      
       playMusic(0);
       requestRef.current = requestAnimationFrame(gameLoop);
     } 
@@ -582,15 +719,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     }
   }, [status]);
 
-  const triggerHitVisuals = (lane: number, type: 'PERFECT' | 'GOOD') => {
+  const triggerHitVisuals = (lane: number, type: 'PERFECT' | 'GOOD', overrideX?: number, overrideY?: number) => {
       const isPerfect = type === 'PERFECT';
       playHitSound(type);
-      laneHitStateRef.current[lane] = 1.0; 
+      if (lane >= 0 && lane < laneHitStateRef.current.length) {
+          laneHitStateRef.current[lane] = 1.0; 
+      }
       comboScaleRef.current = 1.4;
       hitFlashScaleRef.current = Math.min(0.6, hitFlashScaleRef.current + (isPerfect ? 0.2 : 0.1));
       const { height } = sizeRef.current;
-      const laneX = (startXRef.current + lane * laneWidthRef.current + laneWidthRef.current / 2);
-      const hitY = height * (isMobileRef.current ? 0.85 : 0.80);
+      const laneX = overrideX !== undefined ? overrideX : (startXRef.current + lane * laneWidthRef.current + laneWidthRef.current / 2);
+      const hitY = overrideY !== undefined ? overrideY : height * (isMobileRef.current ? 0.85 : 0.80);
       const hitColor = isPerfect ? safeThemeRef.current.perfectColor : safeThemeRef.current.goodColor;
       
       const pCount = isMobileRef.current ? (isPerfect ? 10 : 6) : (isPerfect ? 20 : 12);
@@ -600,7 +739,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
           particlesRef.current.push(p);
       }
       
-      effectRef.current.push({ id: Math.random(), text: type, time: performance.now(), lane: lane, color: hitColor, scale: 1.4 });
+      effectRef.current.push({ id: Math.random(), text: type, time: performance.now(), lane: lane, color: hitColor, scale: 1.4, x: overrideX, y: overrideY });
   };
 
   const drawSystemStats = (ctx: CanvasRenderingContext2D, width: number, height: number, now: number) => {
@@ -648,7 +787,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d', { alpha: false }); 
+    const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true }); 
     if (!ctx) return;
 
     const { width, height, dpr } = sizeRef.current;
@@ -695,9 +834,52 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     
     let beatPulse = 0;
     if (!isFrozen) {
-        const bpm = structure?.bpm || 120;
-        const beatDur = 60 / bpm;
-        beatPulse = Math.pow(1 - (gameTime % beatDur) / beatDur, 2); 
+        if (analyserRef.current && dataArrayRef.current && audioContextRef.current?.state === 'running') {
+            analyserRef.current.getByteFrequencyData(dataArrayRef.current);
+            
+            // Calculate overall volume to prevent pulsing during silence
+            let totalSum = 0;
+            for (let i = 0; i < dataArrayRef.current.length; i++) {
+                totalSum += dataArrayRef.current[i];
+            }
+            const overallVolume = (totalSum / dataArrayRef.current.length) / 255.0;
+
+            if (overallVolume > 0.01) { 
+                const bpm = structure?.bpm || 120;
+                const beatDur = 60 / bpm;
+                
+                // 强制对齐节拍：计算当前时间在节拍周期中的位置 (0 到 1)
+                // Math.pow 提高对比度，让它在节拍点迅速亮起并呈曲线衰减
+                const beatProgress = (gameTime % beatDur) / beatDur;
+                const rhythmicPulse = Math.pow(1 - beatProgress, 3);
+                
+                // 音量决定了律动的强度（最大亮度）
+                // 乘以一个系数，避免小音量时太暗，并确保它在合理的范围内
+                const volumeScale = Math.min(1.0, overallVolume * 3.5);
+                
+                // 取一点底鼓（低频）来增加一点有机的反应
+                const bassAvg = dataArrayRef.current[0] / 255.0;
+                const bassKick = bassAvg > 0.4 ? (bassAvg - 0.4) * 0.3 : 0;
+
+                const targetPulse = rhythmicPulse * volumeScale * 0.85 + bassKick;
+                
+                // 快速响应发声，平滑缓释
+                if (targetPulse > envelopeRef.current) {
+                    envelopeRef.current = envelopeRef.current * 0.2 + targetPulse * 0.8;
+                } else {
+                    envelopeRef.current = envelopeRef.current * 0.85 + targetPulse * 0.15;
+                }
+                
+                beatPulse = envelopeRef.current;
+            } else {
+                // 无音量时平滑过渡到静止
+                envelopeRef.current = envelopeRef.current * 0.8;
+                beatPulse = envelopeRef.current;
+            }
+        } else {
+            // No analyser data, default to 0 to prevent moving before audio starts or after it ends
+            beatPulse = 0; 
+        }
     }
 
     const bgGrad = ctx.createLinearGradient(0, 0, 0, height);
@@ -712,10 +894,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     
     const baseOpacity = visualIntensity * 0.25;
     const kiaiStrength = Math.max(0, (visualIntensity - 0.6) / 0.6); 
-    const kiaiBoost = kiaiStrength * (beatPulse * 0.2);
-    // Add hit flash to global ambient lighting
-    const flashBoost = hitFlashScaleRef.current * 0.15;
-    const finalOpacity = Math.min(0.5, baseOpacity + kiaiBoost + flashBoost);
+    const kiaiBoost = kiaiStrength * (beatPulse * 0.25);
+    
+    // Only pulse with the beat of the music, not user key presses
+    const beatGlow = beatPulse * 0.2; 
+    
+    const finalOpacity = Math.min(0.8, baseOpacity + beatGlow + kiaiBoost);
 
     if (!isFrozen && hitFlashScaleRef.current > 0) {
         hitFlashScaleRef.current -= 0.05;
@@ -741,31 +925,159 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.drawImage(staticCanvasRef.current, 0, 0, width, height);
     } else layoutDirtyRef.current = true;
 
-    const hitBarAlpha = 0.4 + beatPulse * 0.3;
+    if (playMode === 'ORBIT') {
+        const currTime = gameTime;
+        const activeNode = pathNodesRef.current[currentOrbitIdxRef.current] || pathNodesRef.current[pathNodesRef.current.length - 1];
+        if (activeNode) {
+            cameraRef.current.x += (activeNode.x - cameraRef.current.x) * 0.15;
+            cameraRef.current.y += (activeNode.y - cameraRef.current.y) * 0.15;
+            
+            ctx.save();
+            ctx.translate(width / 2 - cameraRef.current.x, height / 2 - cameraRef.current.y);
+            
+            ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+            ctx.lineWidth = 14;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            const startIdx = Math.max(0, currentOrbitIdxRef.current - 5);
+            const endIdx = Math.min(pathNodesRef.current.length - 1, currentOrbitIdxRef.current + 20);
+            for (let i = startIdx; i <= endIdx; i++) {
+                const p = pathNodesRef.current[i];
+                if (i === startIdx) ctx.moveTo(p.x, p.y);
+                else ctx.lineTo(p.x, p.y);
+            }
+            ctx.stroke();
+            
+            // Draw an overlay inner line
+            ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+            ctx.lineWidth = 4;
+            ctx.stroke();
+
+            for (let i = startIdx; i <= endIdx; i++) {
+                const p = pathNodesRef.current[i];
+                ctx.beginPath();
+                
+                const isTarget = i === currentOrbitIdxRef.current + 1;
+                const isPivot = i === currentOrbitIdxRef.current;
+                
+                ctx.fillStyle = i <= currentOrbitIdxRef.current ? 'rgba(255,255,255,0.1)' : (isTarget ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)');
+                ctx.arc(p.x, p.y, isTarget ? 12 : (isPivot ? 12 : 8), 0, Math.PI * 2);
+                ctx.fill();
+                
+                if (isTarget) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = safeThemeRef.current.perfectColor;
+                    ctx.arc(p.x, p.y, 20 + Math.sin(currTime * 10) * 5, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+            }
+
+            if (isAutoRef.current) {
+                const nextNote = notesRef.current[currentOrbitIdxRef.current];
+                if (nextNote && currTime >= nextNote.time) {
+                    handleOrbitInteract(true);
+                }
+            } else {
+                const nextNote = notesRef.current[currentOrbitIdxRef.current];
+                if (nextNote && currTime > nextNote.time + 0.15) {
+                    nextNote.missed = true;
+                    scoreRef.current.combo = 0;
+                    scoreRef.current.miss++;
+                    
+                    const targetNode = pathNodesRef.current[currentOrbitIdxRef.current + 1] as any || activeNode as any;
+                    const screenX = sizeRef.current.width / 2 - cameraRef.current.x + targetNode.x;
+                    const screenY = sizeRef.current.height / 2 - cameraRef.current.y + targetNode.y;
+                    
+                    effectRef.current.push({ id: Math.random(), text: 'MISS', time: performance.now(), lane: 1, color: '#888888', scale: 1.2, x: screenX, y: screenY });
+                    currentOrbitIdxRef.current++;
+                    if (scoreUIRef.current) scoreUIRef.current.innerText = Math.round(scoreRef.current.score).toLocaleString();
+                }
+            }
+
+            const isEvenIdx = currentOrbitIdxRef.current % 2 === 0;
+            const pivotColor = isEvenIdx ? safeThemeRef.current.primaryColor : safeThemeRef.current.secondaryColor;
+            const orbiterColor = isEvenIdx ? safeThemeRef.current.secondaryColor : safeThemeRef.current.primaryColor;
+
+            ctx.fillStyle = pivotColor;
+            ctx.beginPath();
+            ctx.arc(activeNode.x, activeNode.y, 15, 0, Math.PI * 2);
+            ctx.fill();
+
+            const nextNote = notesRef.current[currentOrbitIdxRef.current];
+            const nodeInfo = activeNode as any;
+            
+            const dt = nextNote ? (nextNote.time - nodeInfo.time) : 1;
+            const progress = dt <= 0 ? 1 : (currTime - nodeInfo.time) / dt;
+            const orbiterAngle = nodeInfo.startAngle + (nodeInfo.endAngle - nodeInfo.startAngle) * Math.max(0, progress);
+
+            const orbiterX = nodeInfo.x + Math.cos(orbiterAngle) * 80;
+            const orbiterY = nodeInfo.y + Math.sin(orbiterAngle) * 80;
+
+            ctx.fillStyle = orbiterColor;
+            ctx.beginPath();
+            ctx.arc(orbiterX, orbiterY, 12, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(activeNode.x, activeNode.y);
+            ctx.lineTo(orbiterX, orbiterY);
+            ctx.stroke();
+            
+            ctx.restore();
+        }
+    } else {
+        // Phigros-style floating judgment line across the whole screen width
+    const hitBarAlpha = 0.5 + beatPulse * 0.5;
     ctx.fillStyle = `${safeThemeRef.current.primaryColor}${Math.floor(hitBarAlpha * 255).toString(16).padStart(2,'0')}`;
-    ctx.fillRect(startX, hitLineY - 1, count * laneW, 2);
-    ctx.fillStyle = `${safeThemeRef.current.primaryColor}22`;
-    ctx.fillRect(startX, hitLineY - 3, count * laneW, 6);
+    ctx.fillRect(0, hitLineY - 1.5, width, 3);
+    
+    // Judgment line glow
+    ctx.shadowColor = safeThemeRef.current.primaryColor;
+    ctx.shadowBlur = 10 + beatPulse * 20;
+    ctx.fillStyle = `${safeThemeRef.current.primaryColor}44`;
+    ctx.fillRect(0, hitLineY - 3, width, 6);
+    ctx.shadowBlur = 0;
 
     for (let i = 0; i < count; i++) {
-        const x = startX + i * laneW;
+        const x = startX + i * laneW + laneW / 2; // Center of the floating lane
+        
         if (laneMissStateRef.current[i] > 0) {
-            ctx.fillStyle = `rgba(255, 50, 50, ${laneMissStateRef.current[i] * 0.25})`; 
-            ctx.fillRect(x, 0, laneW, height);
+            // Radial red flash for miss
+            const missGrad = ctx.createRadialGradient(x, hitLineY, 0, x, hitLineY, laneW);
+            missGrad.addColorStop(0, `rgba(255, 50, 50, ${laneMissStateRef.current[i] * 0.4})`);
+            missGrad.addColorStop(1, 'rgba(255, 50, 50, 0)');
+            ctx.fillStyle = missGrad;
+            ctx.fillRect(x - laneW, hitLineY - laneW, laneW * 2, laneW * 2);
             if (!isFrozen) laneMissStateRef.current[i] = Math.max(0, laneMissStateRef.current[i] - 0.05);
         }
+        
         if (laneHitStateRef.current[i] > 0) {
+            // Radial or diamond flash for hit on the judgment line
             const alpha = laneHitStateRef.current[i];
-            const grad = ctx.createLinearGradient(x, hitLineY, x, hitLineY - 300); 
-            grad.addColorStop(0, `${safeThemeRef.current.primaryColor}${Math.floor(alpha * 100).toString(16).padStart(2,'0')}`);
-            grad.addColorStop(1, 'rgba(0,0,0,0)');
-            ctx.fillStyle = grad;
-            ctx.fillRect(x, hitLineY - 300, laneW, 300);
+            const hitGrad = ctx.createRadialGradient(x, hitLineY, 0, x, hitLineY, laneW * 1.5);
+            hitGrad.addColorStop(0, `${safeThemeRef.current.primaryColor}${Math.floor(alpha * 200).toString(16).padStart(2,'0')}`);
+            hitGrad.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = hitGrad;
+            ctx.fillRect(x - laneW * 1.5, hitLineY - laneW * 1.5, laneW * 3, laneW * 3);
             if (!isFrozen) laneHitStateRef.current[i] = Math.max(0, alpha - 0.1);
         }
+        
+        // Key down feedback
         if (keyStateRef.current[i] || (isAutoRef.current && laneHitStateRef.current[i] > 0.5)) {
-            ctx.fillStyle = `${safeThemeRef.current.primaryColor}22`; 
-            ctx.fillRect(x, hitLineY - 150, laneW, 150);
+            // A subtle glow under the pressed key
+            const pressAlpha = isAutoRef.current ? laneHitStateRef.current[i] * 0.3 : 0.3;
+            const pressGrad = ctx.createRadialGradient(x, hitLineY, 0, x, hitLineY, laneW);
+            pressGrad.addColorStop(0, `rgba(255, 255, 255, ${pressAlpha})`);
+            pressGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = pressGrad;
+            ctx.fillRect(x - laneW, hitLineY - laneW, laneW * 2, laneW * 2);
+            
+            // Brighten the segment of the judgment line
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(x - laneW/2, hitLineY - 2, laneW, 4);
         }
     }
 
@@ -886,7 +1198,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             // --- Catch Logic Upgrade: Check for "Hold-through" ---
             if (note.type === 'CATCH' && !note.hit && !note.missed && !isAutoRef.current) {
                  const windowCatch = BASE_HIT_WINDOW_CATCH * hitWindowMultiplierRef.current;
-                 const biasedTime = gameTime - 0.035; // HARDWARE_LATENCY_BIAS
+                 const biasedTime = gameTime - 0; // HARDWARE_LATENCY_BIAS
                  // If key is CURRENTLY down (held) OR just pressed, allow catch
                  // Only resolve when note is very close to hit line to avoid early popping
                  if (biasedTime >= note.time - 0.06 && biasedTime <= note.time + windowCatch && keyStateRef.current[note.lane]) {
@@ -1008,31 +1320,34 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         // Draw Head (Only if not holding or it's a catch/tap)
         if (!note.isHolding || note.type === 'CATCH') {
             if (note.type === 'CATCH') {
-                const cx = dynamicX + dynamicW / 2; const cy = drawHeadY;
                 ctx.fillStyle = noteColor;
                 ctx.beginPath();
                 if (ctx.roundRect) {
-                    ctx.roundRect(dynamicX + 4, drawHeadY - 6, dynamicW - 8, 12, 6);
+                    ctx.roundRect(dynamicX + 4, drawHeadY - 4, dynamicW - 8, 8, 4);
                 } else {
-                    ctx.fillRect(dynamicX + 4, drawHeadY - 6, dynamicW - 8, 12);
+                    ctx.fillRect(dynamicX + 4, drawHeadY - 4, dynamicW - 8, 8);
                 }
                 ctx.fill();
                 
+                // Inner bright core
                 ctx.fillStyle = '#FFF';
                 ctx.beginPath();
                 if (ctx.roundRect) {
-                    ctx.roundRect(dynamicX + 8, drawHeadY - 2, dynamicW - 16, 4, 2);
+                    ctx.roundRect(dynamicX + 12, drawHeadY - 2, dynamicW - 24, 4, 2);
                 } else {
-                    ctx.fillRect(dynamicX + 8, drawHeadY - 2, dynamicW - 16, 4);
+                    ctx.fillRect(dynamicX + 12, drawHeadY - 2, dynamicW - 24, 4);
                 }
                 ctx.fill();
             } else {
+                // Normal notes -> Cyanish, rectangular, with bright center
                 ctx.fillStyle = noteColor;
-                ctx.fillRect(dynamicX, drawHeadY - 5, dynamicW, 10);
-                ctx.fillStyle = 'rgba(255,255,255,0.4)';
-                ctx.fillRect(dynamicX, drawHeadY - 5, dynamicW, 2);
+                ctx.fillRect(dynamicX + 2, drawHeadY - 4, dynamicW - 4, 8);
+                
+                // Bright center core for impact
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillRect(dynamicX + 8, drawHeadY - 2, dynamicW - 16, 4);
             }
-        } 
+        }  
         ctx.globalAlpha = 1.0;
         ctx.shadowBlur = 0;
     }
@@ -1045,23 +1360,26 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.fillStyle = flGrad; ctx.fillRect(0, 0, width, height);
         ctx.restore();
     }
+    }
 
     // Ghost Note Loop (Pooled)
-    const activeGhosts = ghostNotesRef.current;
-    for (let i = activeGhosts.length - 1; i >= 0; i--) {
-        const g = activeGhosts[i];
-        const y = hitLineY - (g.timeDiff * speed);
-        ctx.globalAlpha = g.life * 0.4; ctx.fillStyle = safeThemeRef.current.secondaryColor;
-        ctx.fillRect(startX + g.lane * laneW + 4, y - 6, laneW - 8, 12);
-        ctx.globalAlpha = 1.0; 
-        
-        if (!isFrozen) g.life -= 0.05;
-        
-        if (g.life <= 0) {
-            ghostNotePoolRef.current.release(g);
-            // Swap Remove
-            activeGhosts[i] = activeGhosts[activeGhosts.length - 1];
-            activeGhosts.pop();
+    if (playMode !== 'ORBIT') {
+        const activeGhosts = ghostNotesRef.current;
+        for (let i = activeGhosts.length - 1; i >= 0; i--) {
+            const g = activeGhosts[i];
+            const y = hitLineY - (g.timeDiff * speed);
+            ctx.globalAlpha = g.life * 0.4; ctx.fillStyle = safeThemeRef.current.secondaryColor;
+            ctx.fillRect(startX + g.lane * laneW + 4, y - 6, laneW - 8, 12);
+            ctx.globalAlpha = 1.0; 
+            
+            if (!isFrozen) g.life -= 0.05;
+            
+            if (g.life <= 0) {
+                ghostNotePoolRef.current.release(g);
+                // Swap Remove
+                activeGhosts[i] = activeGhosts[activeGhosts.length - 1];
+                activeGhosts.pop();
+            }
         }
     }
 
@@ -1086,8 +1404,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.fillStyle = effect.color;
         const fontSize = Math.max(16, Math.min(32, width * 0.06));
         ctx.font = `italic 900 ${fontSize}px Arial`; ctx.textAlign = 'center';
-        const x = startX + effect.lane * laneW + laneW / 2;
-        const y = hitLineY - 40 - (progress * 50);
+        const x = effect.x !== undefined ? effect.x : startX + effect.lane * laneW + laneW / 2;
+        const y = effect.y !== undefined ? effect.y - 40 - (progress * 50) : hitLineY - 40 - (progress * 50);
         ctx.globalAlpha = 1 - progress;
         ctx.translate(x, y); ctx.scale(1.2 - progress * 0.2, 1.2 - progress * 0.2);
         ctx.fillText(effect.text, 0, 0);

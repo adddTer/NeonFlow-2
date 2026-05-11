@@ -1,9 +1,10 @@
 
 import React, { useState, useRef, useMemo, useEffect } from 'react';
-import { Upload, Trash2, Download, CheckSquare, Music, Clock, Zap, Plus, Trophy, Disc, Info, X, Calendar, Loader2, AlertTriangle, Heart, SortAsc, ChevronDown, Type, Search, User, Play, ArrowRight, FileJson } from 'lucide-react';
+import { Upload, Trash2, Download, CheckSquare, Music, Clock, Zap, Plus, Trophy, Disc, Info, X, Calendar, Loader2, AlertTriangle, Heart, SortAsc, ChevronDown, Type, Search, User, Play, ArrowRight, FileJson, Edit } from 'lucide-react';
 import { SavedSong } from '../../types';
 import { deleteSong, updateSongMetadata, exportSongAsZip, toggleFavorite } from '../../services/storageService';
 import { calculateAccuracy, calculateRating } from '../../utils/scoring';
+import { EditMetadataModal } from '../modals/EditMetadataModal';
 
 const formatTime = (seconds: number) => {
   const m = Math.floor(seconds / 60);
@@ -57,6 +58,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
   const [isExporting, setIsExporting] = useState(false);
   const [includeHistory, setIncludeHistory] = useState(true);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [editingMetadataSong, setEditingMetadataSong] = useState<SavedSong | null>(null);
 
   const audioInputRef = useRef<HTMLInputElement>(null);
   const mapInputRef = useRef<HTMLInputElement>(null);
@@ -240,7 +242,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
                  <div className="flex flex-col items-center w-full">
                      <div className="hidden md:flex items-center justify-center gap-2 md:gap-3 opacity-90 mb-4 md:mb-6">
                          <div className="px-3 py-1 md:px-4 md:py-1.5 rounded-full border border-white/20 bg-white/10 text-[10px] font-black text-white uppercase tracking-[0.2em] backdrop-blur-md shadow-lg">
-                             {focusedSong.laneCount} KEY
+                             {focusedSong.playMode === 'ORBIT' ? 'ORBIT' : `${focusedSong.laneCount} KEY`}
                          </div>
                          <div className="px-3 py-1 md:px-4 md:py-1.5 rounded-full border border-white/20 bg-white/10 text-[10px] font-black text-white uppercase tracking-[0.2em] backdrop-blur-md flex items-center gap-1.5 md:gap-2 shadow-lg">
                              <Zap className="w-3 h-3 text-yellow-400" />
@@ -279,6 +281,15 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
                          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/80 to-transparent -translate-x-full group-hover:animate-shine"></div>
                          <Play className="w-5 h-5 md:w-6 md:h-6 fill-current" />
                          <span>开始游戏</span>
+                     </button>
+                     
+                     <button 
+                        onClick={() => setEditingMetadataSong(focusedSong)}
+                        className="px-4 md:px-6 py-3 md:py-4 bg-black/40 hover:bg-white/10 border border-white/10 text-white font-bold text-xs md:text-sm uppercase tracking-wider rounded-2xl backdrop-blur-md transition-all flex items-center justify-center gap-2 hover:border-white/30"
+                        title="编辑信息"
+                     >
+                         <Edit className="w-4 h-4 md:w-5 md:h-5" />
+                         <span className="hidden lg:inline">编辑信息</span>
                      </button>
                      
                      <button 
@@ -514,6 +525,17 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({
                   </div>
               </div>
           </div>
+      )}
+
+      {editingMetadataSong && (
+          <EditMetadataModal 
+              song={editingMetadataSong} 
+              onClose={() => setEditingMetadataSong(null)} 
+              onSuccess={() => {
+                  setEditingMetadataSong(null);
+                  onRefreshLibrary();
+              }} 
+          />
       )}
     </div>
   );

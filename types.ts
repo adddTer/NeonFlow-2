@@ -31,6 +31,7 @@ export enum GameModifier {
 export type LaneCount = 4 | 6;
 export type PlayStyle = 'THUMB' | 'MULTI'; // Thumb = Max 2 simultaneous, Multi = Unlimited
 export type NoteType = 'NORMAL' | 'CATCH';
+export type PlayMode = 'FALLING' | 'ORBIT';
 
 export interface KeyConfig {
   k4: string[];
@@ -116,6 +117,7 @@ export interface SavedSong {
   structure: SongStructure; // AI 分析结果
   theme: AITheme; // 生成的主题
   difficultyRating: number; // Calculated weighted difficulty
+  playMode: PlayMode; // Game mode
   laneCount: LaneCount;
   bestResult?: GameResult; // 历史最佳成绩
   isFavorite?: boolean; // P2 Feature: Favorites

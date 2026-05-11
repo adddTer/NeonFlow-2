@@ -374,9 +374,13 @@ export const generateBeatmap = (
         
         const percentile = l / pitches.length;
         
+        // Random variance to the target percentile to make tracks feel more alive
+        let variedPercentile = percentile + (Math.random() - 0.5) * 0.1;
+        variedPercentile = Math.max(0, Math.min(1, variedPercentile));
+        
         // Map percentile [0, 1] to lane [0, laneCount - 1]
         // E.g. Low pitches on the left, high pitches on the right
-        return Math.floor(percentile * laneCount * 0.99); // 0.99 ensures it doesn't hit laneCount
+        return Math.floor(variedPercentile * laneCount * 0.99); // 0.99 ensures it doesn't hit laneCount
     };
 
     let notes: Note[] = [];
@@ -438,6 +442,13 @@ export const generateBeatmap = (
         const isSibilant = onset.zcr !== undefined && onset.zcr > 0.35;
         const effectiveEnergy = isSibilant ? onset.energy * 2.0 : onset.energy;
 
+        // Extremely low volume filter: if music hasn't really started, skip
+        if (effectiveEnergy < 0.02 || (currentSection.intensity < 0.2 && effectiveEnergy < 0.05)) {
+            noteIndex++;
+            isCatchChain = false;
+            continue;
+        }
+
         if (effectiveEnergy < dynThreshold) {
             // Instead of fully skipping, let's treat faint notes as "ghost notes". 
             // We only keep them if they are part of a slide or close to the previous note.
@@ -453,7 +464,27 @@ export const generateBeatmap = (
             }
         }
 
-        if (onset.time - lastGeneratedTime < config.minGap && !isGhostNote && !isSibilant) {
+        // --- Dynamic Density Control ---
+        // Dynamically adjust gap based on Section intensity (climax logic) and local volume
+        let dynamicMinGap = config.minGap;
+
+        if (currentSection.intensity <= 0.35) {
+            dynamicMinGap *= 2.5; // Very sparse before formal start or in calm sections
+        } else if (currentSection.intensity <= 0.6) {
+            dynamicMinGap *= 1.5; // Slightly sparser in verses
+        } else if (currentSection.intensity >= 0.85) {
+            dynamicMinGap *= 0.85; // Denser in climax
+        }
+        
+        // Random variance to dynamic min gap to prevent repeating exactly the same chart
+        dynamicMinGap *= (0.85 + Math.random() * 0.3);
+
+        // Local volume adjustment (quieter parts in a section -> larger gap)
+        if (effectiveEnergy < 0.2) {
+            dynamicMinGap *= 1.5;
+        }
+
+        if (onset.time - lastGeneratedTime < dynamicMinGap && !isGhostNote && !isSibilant) {
             noteIndex++;
             continue;
         }
@@ -888,11 +919,10 @@ export const calculateDifficultyRating = (notes: Note[], duration: number): numb
     }
 
     // Baseline tuning
-    let finalRating = Math.pow(diff, 0.6) * 0.9;
+    const nps = duration > 0 ? notes.length / duration : 0;
     
-    // Density bonus
-    const nps = notes.length / duration;
-    finalRating += nps * 0.2;
+    // Adjusted curve to keep max difficulty typically between 20-25 instead of 40-50, but higher than 13-16
+    let finalRating = Math.sqrt(diff) * 0.75 + nps * 0.2;
 
     return Math.max(1, parseFloat(finalRating.toFixed(2)));
 };

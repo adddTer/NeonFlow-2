@@ -4,7 +4,7 @@ import { preprocessAudioData } from '../utils/audioAnalyzer';
 import { saveSong } from '../services/storageService';
 import { extractCoverArt } from '../utils/audioMetadata';
 import { fileToBase64 } from '../utils/fileUtils'; 
-import { BeatmapDifficulty, LaneCount, PlayStyle, SavedSong, AITheme, DEFAULT_THEME, Note, SongStructure } from '../types';
+import { BeatmapDifficulty, LaneCount, PlayStyle, PlayMode, SavedSong, AITheme, DEFAULT_THEME, Note, SongStructure } from '../types';
 
 export const useSongGenerator = (
     apiKey: string, 
@@ -22,6 +22,7 @@ export const useSongGenerator = (
     
     const [selectedLaneCount, setSelectedLaneCount] = useState<LaneCount>(4);
     const [selectedPlayStyle, setSelectedPlayStyle] = useState<PlayStyle>('THUMB');
+    const [selectedPlayMode, setSelectedPlayMode] = useState<PlayMode>('FALLING');
     const [selectedDifficulty, setSelectedDifficulty] = useState<number | null>(null);
     const [aiOptions, setAiOptions] = useState<any>({}); 
     const [beatmapFeatures, setBeatmapFeatures] = useState({ normal: true, holds: true, catch: true });
@@ -42,7 +43,7 @@ export const useSongGenerator = (
     
     const resetError = () => setErrorState({ hasError: false, type: '', message: null });
 
-    const handleCreateBeatmap = async (options?: { empty?: boolean }) => {
+    const handleCreateBeatmap = async (options?: { empty?: boolean, metadata?: { title: string, artist: string } }) => {
         if (!pendingFile) return;
         const isEmptyMode = options?.empty === true;
         if (!isEmptyMode && selectedDifficulty === null) return;
@@ -79,8 +80,8 @@ export const useSongGenerator = (
             setLoadingProgress(20);
 
             const aiMetadata = { 
-                title: file.name.replace(/\.[^/.]+$/, ""), 
-                artist: "Unknown Artist",  
+                title: options?.metadata?.title || file.name.replace(/\.[^/.]+$/, ""), 
+                artist: options?.metadata?.artist || "Unknown Artist",  
                 theme: DEFAULT_THEME 
             };
 
@@ -116,9 +117,9 @@ export const useSongGenerator = (
                             sampleRate: decodedBuffer.sampleRate,
                             duration: decodedBuffer.duration,
                             difficulty: selectedDifficulty,
-                            laneCount: selectedLaneCount,
+                            laneCount: selectedPlayMode === 'ORBIT' ? 1 : selectedLaneCount,
                             playStyle: selectedPlayStyle,
-                            features: beatmapFeatures
+                            features: selectedPlayMode === 'ORBIT' ? { normal: true, holds: false, catch: false } : beatmapFeatures
                         }
                     });
                 });
@@ -148,6 +149,7 @@ export const useSongGenerator = (
                 structure: structure as any,
                 theme: aiMetadata.theme,
                 difficultyRating: rating,
+                playMode: selectedPlayMode,
                 laneCount: selectedLaneCount
             };
 
@@ -198,6 +200,7 @@ export const useSongGenerator = (
         handleCreateBeatmap,
         selectedLaneCount, setSelectedLaneCount,
         selectedPlayStyle, setSelectedPlayStyle,
+        selectedPlayMode, setSelectedPlayMode,
         selectedDifficulty, setSelectedDifficulty,
         aiOptions, setAiOptions,
         beatmapFeatures, setBeatmapFeatures,

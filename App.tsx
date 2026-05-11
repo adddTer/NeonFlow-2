@@ -34,6 +34,7 @@ function App() {
   const [theme, setTheme] = useState<AITheme>(DEFAULT_THEME); 
   const [score, setScore] = useState<ScoreState>({ score: 0, combo: 0, maxCombo: 0, perfect: 0, good: 0, miss: 0, hitHistory: [], modifiers: [] });
   const [songName, setSongName] = useState<string>("");
+  const [currentPlayMode, setCurrentPlayMode] = useState<PlayMode>('FALLING');
   const [currentSongId, setCurrentSongId] = useState<string | null>(null); 
   const [editingSong, setEditingSong] = useState<SavedSong | null>(null);
   const [detailSong, setDetailSong] = useState<SavedSong | null>(null); // New: Song being viewed in Details
@@ -60,7 +61,8 @@ function App() {
   const { 
     scrollSpeed, setScrollSpeed, keyConfig, setKeyConfig, audioOffset, setAudioOffset,
     isDebugMode, toggleDebugMode, customApiKey, setCustomApiKey, apiKeyStatus, 
-    validationError, handleSaveSettings, hasEnvKey, showKeys, setShowKeys
+    validationError, handleSaveSettings, hasEnvKey, showKeys, setShowKeys,
+    showGuideLines, setShowGuideLines
   } = useAppSettings();
 
   const {
@@ -97,6 +99,7 @@ function App() {
     loadingStage, setLoadingStage, loadingSubText, setLoadingSubText, loadingProgress,
     errorMessage, setErrorMessage, onFileSelect, handleCreateBeatmap,
     selectedLaneCount, setSelectedLaneCount, selectedPlayStyle, setSelectedPlayStyle,
+    selectedPlayMode, setSelectedPlayMode,
     selectedDifficulty, setSelectedDifficulty, aiOptions, setAiOptions,
     beatmapFeatures, setBeatmapFeatures, skipAI, setSkipAI,
     useProModel, setUseProModel, // FIX: Destructure these
@@ -111,7 +114,7 @@ function App() {
 
   // --- Logic Wrappers ---
 
-  const executeCreateBeatmap = async (options?: { empty?: boolean }) => {
+  const executeCreateBeatmap = async (options?: { empty?: boolean, metadata?: { title: string, artist: string } }) => {
       setStatus(GameStatus.Analyzing); 
       const result = await handleCreateBeatmap(options);
       if (result?.success) {
@@ -263,6 +266,7 @@ function App() {
           setStructure(fullSong.structure);
           setTheme(fullSong.theme);
           setSongName(fullSong.title);
+          setCurrentPlayMode(fullSong.playMode || 'FALLING');
           setStatus(GameStatus.Ready);
       } catch (e) {
           console.error("Failed to load song audio", e);
@@ -436,6 +440,7 @@ function App() {
             file={pendingFile}
             onCancel={() => { setPendingFile(null); setIsConfiguringSong(false); }}
             onConfirm={executeCreateBeatmap}
+            playMode={selectedPlayMode} setPlayMode={setSelectedPlayMode}
             laneCount={selectedLaneCount} setLaneCount={setSelectedLaneCount}
             playStyle={selectedPlayStyle} setPlayStyle={setSelectedPlayStyle}
             difficulty={selectedDifficulty} setDifficulty={setSelectedDifficulty}
@@ -459,6 +464,7 @@ function App() {
             rebindingKey={rebindingKey} setRebindingKey={setRebindingKey} hasEnvKey={hasEnvKey}
             onRestartTutorial={restartTutorial}
             showKeys={showKeys} setShowKeys={setShowKeys}
+            showGuideLines={showGuideLines} setShowGuideLines={setShowGuideLines}
         />
       )}
 
@@ -548,7 +554,7 @@ function App() {
                          </div>
                          <div className="bg-white/5 p-3 rounded-xl border border-white/5 backdrop-blur-md flex flex-col items-center justify-center">
                              <div className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mb-1">按键</div>
-                             <div className="text-lg font-black text-white">{notes.some(n => n.lane > 3) ? '6K' : '4K'}</div>
+                             <div className="text-lg font-black text-white">{currentPlayMode === 'ORBIT' ? 'ORBIT' : (notes.some(n => n.lane > 3) ? '6K' : '4K')}</div>
                          </div>
                          <div className="bg-white/5 p-3 rounded-xl border border-white/5 backdrop-blur-md flex flex-col items-center justify-center">
                              <div className="text-[10px] text-gray-500 uppercase tracking-widest font-bold mb-1">BPM</div>
@@ -566,7 +572,7 @@ function App() {
                              <Zap className="w-4 h-4" /> 游戏修改器 <span className="text-[10px] text-gray-600 ml-auto">(开启后将不计入最佳成绩)</span>
                          </div>
                          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                             {MODS_LIST.map(mod => {
+                             {MODS_LIST.filter(mod => currentPlayMode !== 'ORBIT' || mod.id === GameModifier.Auto || mod.id === GameModifier.KeepScore).map(mod => {
                                  const isActive = activeModifiers.has(mod.id);
                                  return (
                                      <button
@@ -667,6 +673,7 @@ function App() {
 
                  <GameCanvas 
                     key={gameSessionId} // Force re-render on restart
+                    playMode={currentPlayMode}
                     status={status} 
                     audioBuffer={audioBuffer} 
                     notes={notes} 
@@ -674,12 +681,13 @@ function App() {
                     theme={theme} 
                     audioOffset={audioOffset} 
                     scrollSpeed={scrollSpeed} 
-                    keyBindings={selectedLaneCount === 4 ? keyConfig.k4 : keyConfig.k6} 
+                    keyBindings={currentPlayMode === 'ORBIT' ? [] : (selectedLaneCount === 4 ? keyConfig.k4 : keyConfig.k6)} 
                     modifiers={Array.from(activeModifiers)}
                     isPaused={status === GameStatus.Paused} 
                     onScoreUpdate={setScore} 
                     onGameEnd={handleGameEnd}
                     showKeys={showKeys}
+                    showGuideLines={showGuideLines}
                  />
             </div>
         )}

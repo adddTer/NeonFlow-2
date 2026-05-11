@@ -1,12 +1,15 @@
 
 import React, { useState, useEffect } from 'react';
-import { Music, X, Check, BrainCircuit, Mic2, AlertTriangle, Layers, Zap, SlidersHorizontal, ChevronRight } from 'lucide-react';
-import { BeatmapDifficulty, LaneCount, PlayStyle } from '../../types';
+import { Music, X, Check, BrainCircuit, Mic2, AlertTriangle, Layers, Zap, SlidersHorizontal, ChevronRight, Type } from 'lucide-react';
+import * as mm from 'music-metadata';
+import { BeatmapDifficulty, LaneCount, PlayStyle, PlayMode } from '../../types';
 
 interface SongConfigModalProps {
     file: File;
     onCancel: () => void;
-    onConfirm: (options?: { empty?: boolean }) => void;
+    onConfirm: (options?: { empty?: boolean, metadata?: { title: string, artist: string } }) => void;
+    playMode: PlayMode;
+    setPlayMode: (m: PlayMode) => void;
     laneCount: LaneCount;
     setLaneCount: (c: LaneCount) => void;
     playStyle: PlayStyle;
@@ -30,15 +33,9 @@ interface SongConfigModalProps {
     resetError?: () => void;
 }
 
-const STYLE_PRESETS = [
-    { id: 'Balanced', label: '综合均衡', desc: '节奏与旋律并重', color: 'from-blue-500/20' },
-    { id: 'Stream', label: '体力流', desc: '高密度连点', color: 'from-red-500/20' },
-    { id: 'Tech', label: '技巧流', desc: '复杂切分与交互', color: 'from-purple-500/20' },
-    { id: 'Flow', label: '流畅感', desc: '顺滑的键位移动', color: 'from-green-500/20' },
-];
-
 export const SongConfigModal: React.FC<SongConfigModalProps> = ({
     file, onCancel, onConfirm,
+    playMode, setPlayMode,
     laneCount, setLaneCount,
     difficulty, setDifficulty,
     features, setFeatures,
@@ -49,24 +46,48 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
 }) => {
     
     const [mode, setMode] = useState<'AUTO' | 'MANUAL'>('AUTO');
-    const [style, setStyle] = useState<string>('Balanced');
     
+    // Metadata states
+    const [title, setTitle] = useState(file.name.replace(/\.[^/.]+$/, ""));
+    const [artist, setArtist] = useState("Unknown Artist");
+    
+    // Read Metadata from file
+    useEffect(() => {
+        const parseMetadata = async () => {
+            try {
+                const metadata = await mm.parseBlob(file);
+                if (metadata.common.title) {
+                    setTitle(metadata.common.title);
+                }
+                const foundArtist = metadata.common.artist || metadata.common.albumartist || metadata.common.encodersettings;
+                if (foundArtist && !foundArtist.includes("Lavf")) { // Sometimes lavf is put in artist
+                    setArtist(foundArtist);
+                } else if (metadata.common.artist) {
+                    setArtist(metadata.common.artist); 
+                }
+            } catch (err) {
+                console.warn('Failed to parse metadata', err);
+            }
+        };
+        parseMetadata();
+    }, [file]);
+
     // Init difficulty if null
     useEffect(() => {
         if (difficulty === null) setDifficulty(10);
     }, []);
 
-    // Update AI options when style changes
+    // Update AI options when difficulty changes
     useEffect(() => {
-        setAiOptions({ ...aiOptions, stylePreference: style, difficultyLevel: difficulty || 10 });
-    }, [style, difficulty]);
+        setAiOptions({ ...aiOptions, difficultyLevel: difficulty || 10 });
+    }, [difficulty]);
 
     const handleConfirm = () => {
         if (mode === 'AUTO') {
-            onConfirm(); 
+            onConfirm({ metadata: { title, artist } }); 
         } else {
             setSkipAI(true);
-            onConfirm({ empty: true });
+            onConfirm({ empty: true, metadata: { title, artist } });
         }
     };
 
@@ -207,27 +228,82 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
 
                          <div className="mt-4 md:mt-8">
                              <div className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-                                 <span>按键数量</span>
+                                 <span>游戏模式</span>
                                  <div className="h-[1px] flex-1 bg-white/10"></div>
                              </div>
                              <div className="flex gap-3">
-                                 {[4, 6].map(k => (
-                                     <button
-                                         key={k}
-                                         onClick={() => setLaneCount(k as LaneCount)}
-                                         className={`flex-1 py-4 rounded-xl font-black text-lg transition-all border ${laneCount === k ? 'bg-white text-black border-white shadow-[0_0_20px_rgba(255,255,255,0.3)]' : 'bg-black text-gray-500 border-white/10 hover:border-white/30 hover:text-white'}`}
-                                     >
-                                         {k}K
-                                     </button>
-                                 ))}
+                                 <button
+                                     onClick={() => setPlayMode('FALLING')}
+                                     className={`flex-1 py-4 rounded-xl font-black text-lg transition-all border ${playMode === 'FALLING' ? 'bg-cyan-500 text-white border-cyan-400 shadow-[0_0_20px_rgba(34,211,238,0.3)]' : 'bg-black text-gray-500 border-white/10 hover:border-white/30 hover:text-white'}`}
+                                 >
+                                     下落式
+                                 </button>
+                                 <button
+                                     onClick={() => setPlayMode('ORBIT')}
+                                     className={`flex-1 py-4 rounded-xl font-black text-lg transition-all border ${playMode === 'ORBIT' ? 'bg-blue-500 text-white border-blue-400 shadow-[0_0_20px_rgba(59,130,246,0.3)]' : 'bg-black text-gray-500 border-white/10 hover:border-white/30 hover:text-white'}`}
+                                 >
+                                     旋转点击
+                                 </button>
                              </div>
                          </div>
+
+                         {playMode === 'FALLING' && (
+                             <div className="mt-4 md:mt-8">
+                                 <div className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                     <span>按键数量</span>
+                                     <div className="h-[1px] flex-1 bg-white/10"></div>
+                                 </div>
+                                 <div className="flex gap-3">
+                                     {[4, 6].map(k => (
+                                         <button
+                                             key={k}
+                                             onClick={() => setLaneCount(k as LaneCount)}
+                                             className={`flex-1 py-4 rounded-xl font-black text-lg transition-all border ${laneCount === k ? 'bg-white text-black border-white shadow-[0_0_20px_rgba(255,255,255,0.3)]' : 'bg-black text-gray-500 border-white/10 hover:border-white/30 hover:text-white'}`}
+                                         >
+                                             {k}K
+                                         </button>
+                                     ))}
+                                 </div>
+                             </div>
+                         )}
                      </div>
 
                      {/* Right: Detailed Config */}
-                     <div className="flex-1 flex flex-col relative w-full pt-6 md:pt-8 px-6 md:px-12 bg-transparent text-left shrink-0 md:overflow-y-auto custom-scrollbar">
+                     <div className="flex-1 flex flex-col relative w-full pt-6 md:pt-8 px-6 md:px-12 bg-transparent text-left shrink-0 md:overflow-y-auto custom-scrollbar pb-32">
+                         
+                         {/* Metadata Edit */}
+                         <div className="space-y-4 mb-8 md:mb-12 md:pr-4">
+                             <div className="flex justify-between items-end border-b border-white/5 pb-2 mb-4">
+                                 <div className="flex items-center gap-3">
+                                     <div className="p-2 bg-white/5 rounded-lg"><Type className="w-4 h-4 text-white"/></div>
+                                     <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">曲目信息</h3>
+                                 </div>
+                             </div>
+                             
+                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                 <div className="space-y-2">
+                                     <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-2">歌曲名称</label>
+                                     <input 
+                                         type="text" 
+                                         value={title} 
+                                         onChange={e => setTitle(e.target.value)}
+                                         className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white font-black text-sm focus:outline-none focus:border-white/30 truncate" 
+                                     />
+                                 </div>
+                                 <div className="space-y-2">
+                                     <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest px-2">艺术家</label>
+                                     <input 
+                                         type="text" 
+                                         value={artist} 
+                                         onChange={e => setArtist(e.target.value)}
+                                         className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white font-black text-sm focus:outline-none focus:border-white/30 truncate" 
+                                     />
+                                 </div>
+                             </div>
+                         </div>
+
                          {mode === 'AUTO' ? (
-                             <div className="space-y-8 md:space-y-12 animate-slide-up pb-32 flex-1 md:pr-4">
+                             <div className="space-y-8 md:space-y-12 animate-slide-up flex-1 md:pr-4">
                                  
                                  {/* Difficulty Slider */}
                                  <div className="space-y-6">
@@ -270,51 +346,30 @@ export const SongConfigModal: React.FC<SongConfigModalProps> = ({
                                      </div>
                                  </div>
 
-                                 {/* Style Presets */}
-                                 <div className="space-y-6">
-                                     <div className="flex items-center gap-3 border-b border-white/5 pb-2">
-                                          <div className="p-2 bg-white/5 rounded-lg"><SlidersHorizontal className="w-4 h-4 text-white"/></div>
-                                          <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">谱面风格</h3>
-                                     </div>
-                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                         {STYLE_PRESETS.map(p => (
-                                             <button
-                                                 key={p.id}
-                                                 onClick={() => setStyle(p.id)}
-                                                 className={`p-4 rounded-2xl border text-left transition-all relative overflow-hidden group ${style === p.id ? 'border-white/30 bg-white/10 shadow-lg' : 'border-white/5 bg-black/40 hover:bg-white/5 hover:border-white/20'}`}
-                                             >
-                                                 {style === p.id && <div className={`absolute inset-0 bg-gradient-to-br ${p.color} opacity-20 pointer-events-none`}></div>}
-                                                 <div className="flex items-center justify-between mb-1 relative z-10">
-                                                     <div className={`font-black tracking-widest uppercase ${style === p.id ? 'text-white' : 'text-gray-300'}`}>{p.label}</div>
-                                                     {style === p.id && <Check className="w-4 h-4 text-white" />}
-                                                 </div>
-                                                 <div className="text-[10px] text-gray-500 font-bold tracking-wide uppercase relative z-10">{p.desc}</div>
-                                             </button>
-                                         ))}
-                                     </div>
-                                 </div>
-
                                  {/* Features */}
-                                 <div className="space-y-6 pb-8">
-                                     <div className="flex items-center gap-3 border-b border-white/5 pb-2">
-                                         <div className="p-2 bg-white/5 rounded-lg"><Zap className="w-4 h-4 text-white"/></div>
-                                         <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">音符元素</h3>
+                                 {playMode === 'FALLING' && (
+                                     <div className="space-y-6 pb-8">
+                                         <div className="flex items-center gap-3 border-b border-white/5 pb-2">
+                                             <div className="p-2 bg-white/5 rounded-lg"><Zap className="w-4 h-4 text-white"/></div>
+                                             <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">音符元素</h3>
+                                         </div>
+                                         <div className="flex flex-wrap gap-3">
+                                             {[{k:'normal', l:'单键', required: true}, {k:'holds', l:'长按'}, {k:'catch', l:'滑键'}].map(feat => (
+                                                 <button
+                                                     key={feat.k}
+                                                     disabled={feat.required}
+                                                     onClick={() => setFeatures({...features, [feat.k]: !features[feat.k as keyof typeof features]})}
+                                                     className={`px-5 py-3 rounded-xl text-xs font-black tracking-widest uppercase border transition-all flex items-center gap-3 ${features[feat.k as keyof typeof features] || feat.required ? 'bg-white text-black border-white shadow-[0_0_15px_rgba(255,255,255,0.4)]' : 'bg-black/50 text-gray-500 border-white/10 hover:border-white/30 hover:text-white'} ${feat.required ? 'opacity-80 cursor-not-allowed' : ''}`}
+                                                 >
+                                                     <div className={`w-3 h-3 rounded flex items-center justify-center border ${features[feat.k as keyof typeof features] || feat.required ? 'bg-black border-black' : 'border-gray-600'}`}>
+                                                         {(features[feat.k as keyof typeof features] || feat.required) && <Check className="w-2 h-2 text-white"/>}
+                                                     </div>
+                                                     {feat.l}
+                                                 </button>
+                                             ))}
+                                         </div>
                                      </div>
-                                     <div className="flex flex-wrap gap-3">
-                                         {[{k:'normal', l:'单键'}, {k:'holds', l:'长按'}, {k:'catch', l:'滑键'}].map(feat => (
-                                             <button
-                                                 key={feat.k}
-                                                 onClick={() => setFeatures({...features, [feat.k]: !features[feat.k as keyof typeof features]})}
-                                                 className={`px-5 py-3 rounded-xl text-xs font-black tracking-widest uppercase border transition-all flex items-center gap-3 ${features[feat.k as keyof typeof features] ? 'bg-white text-black border-white shadow-[0_0_15px_rgba(255,255,255,0.4)]' : 'bg-black/50 text-gray-500 border-white/10 hover:border-white/30 hover:text-white'}`}
-                                             >
-                                                 <div className={`w-3 h-3 rounded flex items-center justify-center border ${features[feat.k as keyof typeof features] ? 'bg-black border-black' : 'border-gray-600'}`}>
-                                                     {features[feat.k as keyof typeof features] && <Check className="w-2 h-2 text-white"/>}
-                                                 </div>
-                                                 {feat.l}
-                                             </button>
-                                         ))}
-                                     </div>
-                                 </div>
+                                 )}
                              </div>
                          ) : (
                              <div className="flex-1 flex flex-col justify-center items-center text-center opacity-40 mb-20">

@@ -8,6 +8,7 @@ const LS_KEY_DEBUG = 'neonflow_debug_mode';
 const LS_KEY_SPEED = 'neonflow_scroll_speed';
 const LS_KEY_BINDINGS = 'neonflow_key_bindings';
 const LS_KEY_SHOW_KEYS = 'neonflow_show_keys';
+const LS_KEY_SHOW_GUIDES = 'neonflow_show_guides';
 
 export const useAppSettings = () => {
     const [scrollSpeed, setScrollSpeed] = useState<number>(5.0);
@@ -18,6 +19,7 @@ export const useAppSettings = () => {
     const [audioOffset, setAudioOffset] = useState<number>(0);
     const [isDebugMode, setIsDebugMode] = useState(false);
     const [showKeys, setShowKeys] = useState<boolean>(true);
+    const [showGuideLines, setShowGuideLines] = useState<boolean>(true);
     
     // API Key State
     const [customApiKey, setCustomApiKey] = useState("");
@@ -58,6 +60,9 @@ export const useAppSettings = () => {
 
         const savedShowKeys = localStorage.getItem(LS_KEY_SHOW_KEYS);
         if (savedShowKeys !== null) setShowKeys(savedShowKeys === 'true');
+        
+        const savedShowGuides = localStorage.getItem(LS_KEY_SHOW_GUIDES);
+        if (savedShowGuides !== null) setShowGuideLines(savedShowGuides === 'true');
     }, []);
 
     const validateKey = async (key: string) => {
@@ -83,6 +88,7 @@ export const useAppSettings = () => {
     const handleSaveSettings = async (closeModal: () => void) => {
         localStorage.setItem(LS_KEY_SPEED, String(scrollSpeed));
         localStorage.setItem(LS_KEY_SHOW_KEYS, String(showKeys));
+        localStorage.setItem(LS_KEY_SHOW_GUIDES, String(showGuideLines));
         const trimmedKey = customApiKey.trim();
         
         if (!trimmedKey && !hasEnvKey) {
@@ -116,6 +122,7 @@ export const useAppSettings = () => {
         apiKeyStatus, validationError,
         validateKey, handleSaveSettings,
         hasEnvKey,
-        showKeys, setShowKeys
+        showKeys, setShowKeys,
+        showGuideLines, setShowGuideLines
     };
 };
