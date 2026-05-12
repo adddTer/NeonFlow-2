@@ -9,6 +9,7 @@ const LS_KEY_SPEED = 'neonflow_scroll_speed';
 const LS_KEY_BINDINGS = 'neonflow_key_bindings';
 const LS_KEY_SHOW_KEYS = 'neonflow_show_keys';
 const LS_KEY_SHOW_GUIDES = 'neonflow_show_guides';
+const LS_KEY_ORBIT_HIDDEN = 'neonflow_orbit_hidden';
 
 export const useAppSettings = () => {
     const [scrollSpeed, setScrollSpeed] = useState<number>(5.0);
@@ -20,6 +21,7 @@ export const useAppSettings = () => {
     const [isDebugMode, setIsDebugMode] = useState(false);
     const [showKeys, setShowKeys] = useState<boolean>(true);
     const [showGuideLines, setShowGuideLines] = useState<boolean>(true);
+    const [hiddenBarHeight, setHiddenBarHeight] = useState<number>(0);
     
     // API Key State
     const [customApiKey, setCustomApiKey] = useState("");
@@ -63,6 +65,9 @@ export const useAppSettings = () => {
         
         const savedShowGuides = localStorage.getItem(LS_KEY_SHOW_GUIDES);
         if (savedShowGuides !== null) setShowGuideLines(savedShowGuides === 'true');
+        
+        const hiddenBarHide = localStorage.getItem(LS_KEY_ORBIT_HIDDEN);
+        if (hiddenBarHide !== null) setHiddenBarHeight(Number(hiddenBarHide));
     }, []);
 
     const validateKey = async (key: string) => {
@@ -89,6 +94,7 @@ export const useAppSettings = () => {
         localStorage.setItem(LS_KEY_SPEED, String(scrollSpeed));
         localStorage.setItem(LS_KEY_SHOW_KEYS, String(showKeys));
         localStorage.setItem(LS_KEY_SHOW_GUIDES, String(showGuideLines));
+        localStorage.setItem(LS_KEY_ORBIT_HIDDEN, String(hiddenBarHeight));
         const trimmedKey = customApiKey.trim();
         
         if (!trimmedKey && !hasEnvKey) {
@@ -123,6 +129,7 @@ export const useAppSettings = () => {
         validateKey, handleSaveSettings,
         hasEnvKey,
         showKeys, setShowKeys,
-        showGuideLines, setShowGuideLines
+        showGuideLines, setShowGuideLines,
+        hiddenBarHeight, setHiddenBarHeight
     };
 };

@@ -22,6 +22,7 @@ interface GameCanvasProps {
   onGameEnd: (finalScore: ScoreState) => void;
   showKeys?: boolean;
   showGuideLines?: boolean;
+  hiddenBarHeight?: number;
 }
 
 const BASE_TARGET_WIDTH = 100; 
@@ -61,7 +62,7 @@ const ensureContrast = (hex: string, fallback: string): string => {
 
 const GameCanvas: React.FC<GameCanvasProps> = ({ 
   playMode = 'FALLING', status, audioBuffer, notes, structure, theme, audioOffset, scrollSpeed,
-  keyBindings, modifiers, hideNotes, onScoreUpdate, onGameEnd, showKeys, showGuideLines
+  keyBindings, modifiers, hideNotes, onScoreUpdate, onGameEnd, showKeys, showGuideLines, hiddenBarHeight = 0
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -652,41 +653,68 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
           
           let lastTime = 0;
           
-          // Estimate base beat from common dt
-          let dts = [];
-          for (let i = 0; i < Math.min(20, notesRef.current.length); i++) {
-              if (i > 0) dts.push(notesRef.current[i].time - notesRef.current[i-1].time);
-          }
-          dts.sort();
-          const baseDt = dts.length > 0 ? dts[Math.floor(dts.length / 2)] : 0.5;
-          const ROTATION_SPEED = Math.PI / baseDt;
+          const bpm = structure?.bpm || 120;
+          const beatDur = 60 / bpm;
+          // In ADOFAI, 1 beat is usually 180 degrees
+          const ROTATION_SPEED = Math.PI / beatDur;
           
           for (let i = 0; i < notesRef.current.length; i++) {
               const noteTime = notesRef.current[i].time;
-              const dt = Math.max(0.01, noteTime - lastTime);
+              let dt = Math.max(0.01, noteTime - lastTime);
               
-              // ADOFAI style: alternate CW / CCW visually, or just spin CW continuously?
-              // In ADOFAI, if the path goes straight, the relative angle is PI.
-              // If we always orbit alternating, a straight path is just alternating PI.
-              const isCW = (i % 2 === 0);
+              // Quantize duration to 1/16th of a beat for perfect alignment
+              const subdivision = beatDur / 8;
+              const roundedDt = Math.max(subdivision, Math.round(dt / subdivision) * subdivision);
               
-              let angleDiff = dt * ROTATION_SPEED;
+              let angleDiff = roundedDt * ROTATION_SPEED;
               
-              // Quantize to neat angles (e.g., 45deg, 90deg, 180deg) to keep path clean
-              const snapAngles = [Math.PI/4, Math.PI/2, Math.PI*3/4, Math.PI, Math.PI*1.25, Math.PI*1.5, Math.PI*2];
-              let bestSnap = snapAngles[0];
-              for(const a of snapAngles) if(Math.abs(angleDiff - a) < Math.abs(angleDiff - bestSnap)) bestSnap = a;
-              angleDiff = bestSnap;
+              // Snap to 15-degree increments to ensure clean visuals
+              const angleSnap = Math.PI / 12; // 15 degrees
+              angleDiff = Math.max(angleSnap, Math.round(angleDiff / angleSnap) * angleSnap);
+
+              // We have two choices for direction: CW or CCW
+              const endAngleCW = currentStartAngle + angleDiff;
+              const nextX_CW = currX + Math.cos(endAngleCW) * radius;
+              const nextY_CW = currY + Math.sin(endAngleCW) * radius;
+
+              const endAngleCCW = currentStartAngle - angleDiff;
+              const nextX_CCW = currX + Math.cos(endAngleCCW) * radius;
+              const nextY_CCW = currY + Math.sin(endAngleCCW) * radius;
+
+              // Heuristic scoring to choose the best path
+              const evaluatePath = (nx: number, ny: number, dirCW: boolean) => {
+                  let score = nx * 2.0; // Strongly encourage moving right (+X)
+                  score -= Math.abs(ny) * 1.5; // Keep it somewhat centered vertically
+                  
+                  // Small momentum bonus: keeping the same rotation direction is smoother
+                  if (dirCW === prevIsCW) score += 10;
+                  
+                  for (let j = Math.max(0, nodes.length - 20); j < nodes.length; j++) {
+                      const distSq = Math.pow(nx - nodes[j].x, 2) + Math.pow(ny - nodes[j].y, 2);
+                      const minDist = radius * 1.5;
+                      if (distSq < minDist * minDist) {
+                          score -= 5000; // Big penalty for overlap
+                      }
+                  }
+                  return score;
+              };
+
+              let prevIsCW = nodes.length > 0 ? nodes[nodes.length - 1].isCW : true;
+              const scoreCW = evaluatePath(nextX_CW, nextY_CW, true);
+              const scoreCCW = evaluatePath(nextX_CCW, nextY_CCW, false);
               
-              const endAngle = currentStartAngle + (isCW ? angleDiff : -angleDiff);
+              let isCW = scoreCW >= scoreCCW;
+              
+              let endAngle = isCW ? endAngleCW : endAngleCCW;
+              let nextX = isCW ? nextX_CW : nextX_CCW;
+              let nextY = isCW ? nextY_CW : nextY_CCW;
               
               nodes.push({ x: currX, y: currY, time: lastTime, startAngle: currentStartAngle, endAngle: endAngle, isCW });
               
-              const nextX = currX + Math.cos(endAngle) * radius;
-              const nextY = currY + Math.sin(endAngle) * radius;
-              
               currX = nextX;
               currY = nextY;
+              
+              // Pivot the orbiter: New start angle is opposite of where we landed relative to previous pivot
               currentStartAngle = endAngle + Math.PI;
               lastTime = noteTime;
           }
@@ -929,65 +957,124 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         const currTime = gameTime;
         const activeNode = pathNodesRef.current[currentOrbitIdxRef.current] || pathNodesRef.current[pathNodesRef.current.length - 1];
         if (activeNode) {
-            cameraRef.current.x += (activeNode.x - cameraRef.current.x) * 0.15;
-            cameraRef.current.y += (activeNode.y - cameraRef.current.y) * 0.15;
+            const nextNote = notesRef.current[currentOrbitIdxRef.current];
+            const nodeInfo = activeNode as any;
+            
+            const dt = nextNote ? Math.max(0.01, nextNote.time - nodeInfo.time) : 0.5;
+            const progress = Math.max(0, (currTime - nodeInfo.time) / dt); // removed Math.min(1, ...)
+            const orbiterAngle = nodeInfo.startAngle + (nodeInfo.endAngle - nodeInfo.startAngle) * progress;
+
+            const RADIUS = 80;
+            const orbiterX = nodeInfo.x + Math.cos(orbiterAngle) * RADIUS;
+            const orbiterY = nodeInfo.y + Math.sin(orbiterAngle) * RADIUS;
+
+            // Smoother camera following with focus on the upcoming path
+            const currentMidX = (nodeInfo.x + orbiterX) / 2;
+            const currentMidY = (nodeInfo.y + orbiterY) / 2;
+            const nextNodeX = pathNodesRef.current[currentOrbitIdxRef.current + 1]?.x || orbiterX;
+            const nextNodeY = pathNodesRef.current[currentOrbitIdxRef.current + 1]?.y || orbiterY;
+            
+            // Bias the camera towards the planet we're arriving at instead of purely the midpoint
+            const targetCamX = currentMidX * 0.3 + nextNodeX * 0.7;
+            const targetCamY = currentMidY * 0.3 + nextNodeY * 0.7;
+            
+            // Apply camera smoothing
+            cameraRef.current.x += (targetCamX - cameraRef.current.x) * 0.08;
+            cameraRef.current.y += (targetCamY - cameraRef.current.y) * 0.08;
             
             ctx.save();
             ctx.translate(width / 2 - cameraRef.current.x, height / 2 - cameraRef.current.y);
             
-            ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-            ctx.lineWidth = 14;
+            // 1. Draw "Background" Path Shadow
+            const startIdx = Math.max(0, currentOrbitIdxRef.current - 5); // Don't draw too far back
+            const endIdx = Math.min(pathNodesRef.current.length - 1, currentOrbitIdxRef.current + 30);
+            
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
+            
+            // 2. Draw Tiles (Regularly spaced squares)
+            for (let i = startIdx; i <= endIdx; i++) {
+                const p = pathNodesRef.current[i];
+                const isTarget = i === currentOrbitIdxRef.current + 1;
+                const isPivot = i === currentOrbitIdxRef.current;
+                const isPast = i < currentOrbitIdxRef.current;
+                
+                // Opacity based on distance from current
+                let opacity = 1.0;
+                if (isPast) {
+                    opacity = 1.0 - (currentOrbitIdxRef.current - i) / 5;
+                } else {
+                    opacity = 1.0 - (i - currentOrbitIdxRef.current) / 30;
+                }
+                if (opacity <= 0) continue;
+
+                ctx.save();
+                ctx.translate(p.x, p.y);
+                ctx.globalAlpha = opacity;
+                
+                // Tile Base
+                const s = isTarget ? 38 : (isPivot ? 32 : 26);
+                const rectColor = isPast ? 'rgba(255,255,255,0.1)' : 
+                                  (isTarget ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.3)');
+                
+                ctx.fillStyle = rectColor;
+                
+                // Rotate tile slightly for dynamic feel
+                if (i < pathNodesRef.current.length - 1) {
+                    ctx.rotate(pathNodesRef.current[i].endAngle);
+                }
+
+                if (ctx.roundRect) {
+                    ctx.beginPath(); 
+                    ctx.roundRect(-s/2, -s/2, s, s, 4);
+                    ctx.fill();
+                    
+                    if (isTarget) {
+                        ctx.strokeStyle = safeThemeRef.current.perfectColor;
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                    }
+                } else {
+                    ctx.fillRect(-s/2, -s/2, s, s);
+                }
+
+                // Add "Step Number" or visual detail for clarity
+                if (i % 4 === 0 && !isPast && i > currentOrbitIdxRef.current) {
+                    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+                    ctx.beginPath();
+                    ctx.arc(0, 0, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                ctx.restore();
+            }
+            ctx.globalAlpha = 1.0;
+
+            // 3. Draw Connecting Line between nodes (Ghost Path)
             ctx.beginPath();
-            const startIdx = Math.max(0, currentOrbitIdxRef.current - 5);
-            const endIdx = Math.min(pathNodesRef.current.length - 1, currentOrbitIdxRef.current + 20);
+            ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+            ctx.lineWidth = 12;
             for (let i = startIdx; i <= endIdx; i++) {
                 const p = pathNodesRef.current[i];
                 if (i === startIdx) ctx.moveTo(p.x, p.y);
                 else ctx.lineTo(p.x, p.y);
             }
             ctx.stroke();
-            
-            // Draw an overlay inner line
-            ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-            ctx.lineWidth = 4;
-            ctx.stroke();
 
-            for (let i = startIdx; i <= endIdx; i++) {
-                const p = pathNodesRef.current[i];
-                ctx.beginPath();
-                
-                const isTarget = i === currentOrbitIdxRef.current + 1;
-                const isPivot = i === currentOrbitIdxRef.current;
-                
-                ctx.fillStyle = i <= currentOrbitIdxRef.current ? 'rgba(255,255,255,0.1)' : (isTarget ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)');
-                ctx.arc(p.x, p.y, isTarget ? 12 : (isPivot ? 12 : 8), 0, Math.PI * 2);
-                ctx.fill();
-                
-                if (isTarget) {
-                    ctx.beginPath();
-                    ctx.strokeStyle = safeThemeRef.current.perfectColor;
-                    ctx.arc(p.x, p.y, 20 + Math.sin(currTime * 10) * 5, 0, Math.PI * 2);
-                    ctx.stroke();
-                }
-            }
-
+            // 4. Input handling / Auto Play
             if (isAutoRef.current) {
-                const nextNote = notesRef.current[currentOrbitIdxRef.current];
                 if (nextNote && currTime >= nextNote.time) {
                     handleOrbitInteract(true);
                 }
             } else {
-                const nextNote = notesRef.current[currentOrbitIdxRef.current];
-                if (nextNote && currTime > nextNote.time + 0.15) {
+                if (nextNote && currTime > nextNote.time + 0.18) { // Slightly more lenient miss window for orbit
                     nextNote.missed = true;
                     scoreRef.current.combo = 0;
                     scoreRef.current.miss++;
                     
                     const targetNode = pathNodesRef.current[currentOrbitIdxRef.current + 1] as any || activeNode as any;
-                    const screenX = sizeRef.current.width / 2 - cameraRef.current.x + targetNode.x;
-                    const screenY = sizeRef.current.height / 2 - cameraRef.current.y + targetNode.y;
+                    const screenX = width / 2 - cameraRef.current.x + targetNode.x;
+                    const screenY = height / 2 - cameraRef.current.y + targetNode.y;
                     
                     effectRef.current.push({ id: Math.random(), text: 'MISS', time: performance.now(), lane: 1, color: '#888888', scale: 1.2, x: screenX, y: screenY });
                     currentOrbitIdxRef.current++;
@@ -995,37 +1082,48 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                 }
             }
 
+            // 5. Planets and Interaction Line
             const isEvenIdx = currentOrbitIdxRef.current % 2 === 0;
             const pivotColor = isEvenIdx ? safeThemeRef.current.primaryColor : safeThemeRef.current.secondaryColor;
             const orbiterColor = isEvenIdx ? safeThemeRef.current.secondaryColor : safeThemeRef.current.primaryColor;
 
-            ctx.fillStyle = pivotColor;
-            ctx.beginPath();
-            ctx.arc(activeNode.x, activeNode.y, 15, 0, Math.PI * 2);
-            ctx.fill();
+            // Pulse effect on beat
+            const planetPulse = 1.0 + beatPulse * 0.15;
 
-            const nextNote = notesRef.current[currentOrbitIdxRef.current];
-            const nodeInfo = activeNode as any;
-            
-            const dt = nextNote ? (nextNote.time - nodeInfo.time) : 1;
-            const progress = dt <= 0 ? 1 : (currTime - nodeInfo.time) / dt;
-            const orbiterAngle = nodeInfo.startAngle + (nodeInfo.endAngle - nodeInfo.startAngle) * Math.max(0, progress);
-
-            const orbiterX = nodeInfo.x + Math.cos(orbiterAngle) * 80;
-            const orbiterY = nodeInfo.y + Math.sin(orbiterAngle) * 80;
-
-            ctx.fillStyle = orbiterColor;
-            ctx.beginPath();
-            ctx.arc(orbiterX, orbiterY, 12, 0, Math.PI * 2);
-            ctx.fill();
-            
-            ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-            ctx.lineWidth = 2;
+            // Connecting line (Dynamic width based on music intensity)
+            ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+            ctx.lineWidth = 3 + visualIntensity * 3;
             ctx.beginPath();
             ctx.moveTo(activeNode.x, activeNode.y);
             ctx.lineTo(orbiterX, orbiterY);
             ctx.stroke();
-            
+
+            // Pivot Planet
+            ctx.fillStyle = pivotColor;
+            ctx.shadowColor = pivotColor;
+            ctx.shadowBlur = 10 + beatPulse * 15;
+            ctx.beginPath();
+            ctx.arc(activeNode.x, activeNode.y, 20 * planetPulse, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Orbiter Planet
+            ctx.fillStyle = orbiterColor;
+            ctx.shadowColor = orbiterColor;
+            ctx.shadowBlur = 10 + beatPulse * 15;
+            ctx.beginPath();
+            ctx.arc(orbiterX, orbiterY, 20 * planetPulse, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Direction arrow/indicator
+            const dirAngle = orbiterAngle + (activeNode.isCW ? Math.PI / 2 : -Math.PI / 2);
+            ctx.fillStyle = 'rgba(255,255,255,0.6)';
+            ctx.beginPath();
+            const arrowX = orbiterX + Math.cos(dirAngle) * 30;
+            const arrowY = orbiterY + Math.sin(dirAngle) * 30;
+            ctx.arc(arrowX, arrowY, 4, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.shadowBlur = 0;
             ctx.restore();
         }
     } else {
@@ -1358,6 +1456,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         const flGrad = ctx.createRadialGradient(width/2, hitLineY, 50, width/2, hitLineY, 350);
         flGrad.addColorStop(0, 'rgba(0,0,0,1)'); flGrad.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = flGrad; ctx.fillRect(0, 0, width, height);
+        ctx.restore();
+    }
+    
+    if (hiddenBarHeight > 0) {
+        ctx.save();
+        const hiddenH = height * hiddenBarHeight;
+        const grad = ctx.createLinearGradient(0, 0, 0, hiddenH);
+        grad.addColorStop(0, 'rgba(0,0,0,1)');
+        grad.addColorStop(0.8, 'rgba(0,0,0,1)');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, width, hiddenH);
         ctx.restore();
     }
     }

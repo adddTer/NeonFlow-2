@@ -26,6 +26,8 @@ interface SettingsModalProps {
     setShowKeys: (b: boolean) => void;
     showGuideLines: boolean;
     setShowGuideLines: (b: boolean) => void;
+    hiddenBarHeight: number;
+    setHiddenBarHeight: (n: number) => void;
 }
 
 type SettingsTab = 'GAMEPLAY' | 'CONTROLS' | 'SYSTEM';
@@ -40,7 +42,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     rebindingKey, setRebindingKey, hasEnvKey,
     onRestartTutorial,
     showKeys, setShowKeys,
-    showGuideLines, setShowGuideLines
+    showGuideLines, setShowGuideLines,
+    hiddenBarHeight, setHiddenBarHeight
 }) => {
     
     const [activeTab, setActiveTab] = useState<SettingsTab>('GAMEPLAY');
@@ -215,6 +218,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                              </div>
                                          </>
                                      )}
+                                     
+                                     {/* Orbit Hidden Height */}
+                                     <div className="bg-[#111] border border-white/5 rounded-2xl p-6 relative overflow-hidden group hover:border-white/20 transition-colors">
+                                         <div className="absolute top-0 left-0 w-1 h-full bg-neon-purple opacity-50 group-hover:opacity-100 transition-opacity"></div>
+                                         <div className="flex justify-between items-center mb-8">
+                                              <div className="flex items-center gap-4">
+                                                  <div className="p-3 bg-black border border-white/10 rounded-xl text-neon-purple drop-shadow-md"><Eye className="w-6 h-6" /></div>
+                                                  <div>
+                                                      <div className="font-black text-white text-lg tracking-tight">隐条高度 (下落模式)</div>
+                                                      <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">遮挡上半部分的屏幕比例</div>
+                                                  </div>
+                                              </div>
+                                              <div className="text-neon-purple font-black font-mono text-4xl tabular-nums drop-shadow-[0_0_15px_rgba(216,180,254,0.4)]">{Math.round(hiddenBarHeight * 100)}%</div>
+                                         </div>
+                                         
+                                         <div className="relative h-14 flex items-center bg-black/50 px-4 rounded-xl border border-white/5">
+                                            <input 
+                                                type="range" 
+                                                min="0" 
+                                                max="1" 
+                                                step="0.05"
+                                                value={hiddenBarHeight}
+                                                onChange={(e) => setHiddenBarHeight(Number(e.target.value))}
+                                                className="w-full h-1 bg-gray-800 rounded-full appearance-none cursor-pointer accent-neon-purple hover:accent-white transition-all outline-none"
+                                            />
+                                         </div>
+                                     </div>
                                  </div>
                              )}
 

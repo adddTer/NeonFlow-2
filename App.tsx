@@ -62,7 +62,7 @@ function App() {
     scrollSpeed, setScrollSpeed, keyConfig, setKeyConfig, audioOffset, setAudioOffset,
     isDebugMode, toggleDebugMode, customApiKey, setCustomApiKey, apiKeyStatus, 
     validationError, handleSaveSettings, hasEnvKey, showKeys, setShowKeys,
-    showGuideLines, setShowGuideLines
+    showGuideLines, setShowGuideLines, hiddenBarHeight, setHiddenBarHeight
   } = useAppSettings();
 
   const {
@@ -465,6 +465,7 @@ function App() {
             onRestartTutorial={restartTutorial}
             showKeys={showKeys} setShowKeys={setShowKeys}
             showGuideLines={showGuideLines} setShowGuideLines={setShowGuideLines}
+            hiddenBarHeight={hiddenBarHeight} setHiddenBarHeight={setHiddenBarHeight}
         />
       )}
 
@@ -658,16 +659,23 @@ function App() {
 
         {(status === GameStatus.Playing || status === GameStatus.Countdown || status === GameStatus.Paused) && (
             <div className="absolute inset-0 z-0 w-full h-full">
-                 {/* Pause Overlay Button */}
-                 {status === GameStatus.Playing && (
-                     <div 
-                        className="absolute top-4 left-4 z-[60] flex flex-col items-start gap-2"
-                        onClick={handlePauseRequest}
-                        onTouchStart={handlePauseRequest}
-                     >
-                         <button className="p-3 bg-black/40 backdrop-blur-md border border-white/10 rounded-xl text-white/50 hover:text-white hover:bg-white/10 transition-all active:scale-95">
-                             <Pause className="w-6 h-6" />
-                         </button>
+                 {/* Pause Overlay Button and Song Info */}
+                 {(status === GameStatus.Playing || status === GameStatus.Paused) && (
+                     <div className="absolute top-4 left-4 z-[60] flex flex-row items-center gap-3">
+                         <div 
+                            onClick={handlePauseRequest}
+                            onTouchStart={handlePauseRequest}
+                         >
+                             <button className="p-3 bg-black/40 backdrop-blur-md border border-white/10 rounded-xl text-white/50 hover:text-white hover:bg-white/10 transition-all active:scale-95">
+                                 <Pause className="w-6 h-6" />
+                             </button>
+                         </div>
+                         <div className="px-4 py-2 bg-black/40 backdrop-blur-md border border-white/10 rounded-xl max-w-[200px] md:max-w-[400px]">
+                             <div className="text-white/90 font-bold text-sm md:text-base truncate drop-shadow-md">
+                                 {songName}
+                             </div>
+                             {currentPlayMode === 'ORBIT' && <div className="text-[10px] font-black text-neon-purple uppercase tracking-widest mt-0.5">Orbit Mode</div>}
+                         </div>
                      </div>
                  )}
 
@@ -688,6 +696,7 @@ function App() {
                     onGameEnd={handleGameEnd}
                     showKeys={showKeys}
                     showGuideLines={showGuideLines}
+                    hiddenBarHeight={hiddenBarHeight}
                  />
             </div>
         )}

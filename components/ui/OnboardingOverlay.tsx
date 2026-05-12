@@ -70,29 +70,31 @@ export const OnboardingOverlay: React.FC<OnboardingOverlayProps> = ({ onComplete
         </div>
     );
 
-    const ApiKeyVisual = () => (
+    const PerformanceVisual = () => (
         <div className="w-full max-w-[260px] bg-[#050505] rounded-xl border border-white/10 p-4 shadow-2xl relative overflow-hidden">
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-neon-blue via-purple-500 to-neon-blue"></div>
             
             <div className="space-y-3">
                 <div className="flex justify-between items-center">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase">Settings</div>
-                    <Settings className="w-3 h-3 text-gray-600" />
+                    <div className="text-[10px] font-bold text-gray-500 uppercase">Engine Status</div>
+                    <BrainCircuit className="w-3 h-3 text-gray-600" />
                 </div>
                 
                 <div className="space-y-1">
-                    <label className="text-[10px] text-gray-400 font-bold block">Gemini API Key</label>
+                    <label className="text-[10px] text-gray-400 font-bold block">Client-side DSP Parser</label>
                     <div className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-2 border border-white/10">
-                        <Key className="w-3 h-3 text-gray-500" />
-                        <div className="flex gap-0.5 pt-1">
-                            {[...Array(12)].map((_,i) => <div key={i} className="w-1 h-1 rounded-full bg-gray-500"></div>)}
+                        <Disc className="w-3 h-3 text-gray-500" />
+                        <div className="flex gap-1 pt-0.5">
+                            <div className="w-8 h-1.5 rounded-full bg-neon-blue/80 animate-pulse"></div>
+                            <div className="w-4 h-1.5 rounded-full bg-purple-500/80 animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+                            <div className="w-12 h-1.5 rounded-full bg-neon-blue/80 animate-pulse" style={{ animationDelay: '0.4s' }}></div>
                         </div>
                     </div>
                 </div>
 
                 <div className="flex items-center gap-2 text-[10px] text-green-400 bg-green-500/10 px-2 py-1.5 rounded-lg border border-green-500/20 w-fit">
                     <CheckCircle2 className="w-3 h-3" />
-                    <span className="font-bold">Connected</span>
+                    <span className="font-bold">Offline Ready</span>
                 </div>
             </div>
         </div>
@@ -145,7 +147,7 @@ export const OnboardingOverlay: React.FC<OnboardingOverlayProps> = ({ onComplete
         {
             title: "高性能架构",
             desc: "完全运行在浏览器中的客户端解析，通过 Web Worker 分流音频特征提取，告别卡顿。",
-            visual: <ApiKeyVisual />,
+            visual: <PerformanceVisual />,
             bg: "from-gray-800/40 to-transparent"
         },
         {

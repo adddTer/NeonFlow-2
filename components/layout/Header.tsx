@@ -52,14 +52,6 @@ export const Header: React.FC<HeaderProps> = ({
 
                 {/* Settings & Status */}
                 <div className="flex gap-4 items-center">
-                    {/* API Status Indicator (Only show if issue or analyzing) */}
-                    {apiKeyStatus !== 'valid' && status !== GameStatus.Analyzing && (
-                        <div className="pointer-events-auto bg-red-500/10 backdrop-blur-2xl border border-red-500/30 px-5 py-3 rounded-2xl flex items-center gap-3 animate-pulse shadow-[0_10px_30px_rgba(239,68,68,0.1)]">
-                            <div className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-[0_0_15px_#ef4444]"></div>
-                            <span className="text-xs font-black text-red-400 hidden md:inline tracking-widest">API 断开</span>
-                        </div>
-                    )}
-
                     <button 
                         onClick={onSettings} 
                         disabled={status === GameStatus.Analyzing} 
